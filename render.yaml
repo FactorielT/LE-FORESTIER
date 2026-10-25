@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: leforestier
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: leforestier-db
+          property: connectionString
+      - key: JWT_SECRET
+        generateValue: true
+      - key: SUPERADMIN_PASSWORD
+        sync: false
+      - key: TZ
+        value: Africa/Abidjan
+databases:
+  - name: leforestier-db
+    plan: free
