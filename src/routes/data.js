@@ -73,7 +73,7 @@ function toNum(v) {
 }
 function toBool(v) {
   if (v === null || v === undefined || v === '') return null;
-  return /^(1|true|vrai|oui|yes|o|t)$/i.test(String(v).trim());
+  return /^(1|true|vrai|oui|yes|o|t|x)$/i.test(String(v).trim());
 }
 function convert(v, type) {
   if (type === 'date') return toDate(v);
@@ -194,6 +194,74 @@ router.get('/export/:name.csv', h(async (req, res) => {
   res.setHeader('Content-Disposition', `attachment; filename="${t.name}.csv"`);
   res.send('﻿' + csv);
 }));
+
+// ---------- Modèle Excel d'import ----------
+const MODELE = [
+  { table: 'produit', titre: 'Articles / Stock', desc: 'Liste des boissons avec quantité en stock, prix de vente (pu) et prix d\'achat (prixFour).',
+    cols: ['ref', 'Lib', 'qte', 'pu', 'prixFour', 'typeemballage', 'PRIXEMBALLAGE'],
+    ex: [['0001CO', 'COCA COLA BOUTEILLE 33', 315, 500, 350, 'CASIER', 0], ['0002BA', 'BANANE', 180, 200, 150, '', 0], ['0003JA', 'JACK DANIEL', 60, 2000, 1650, 'CARTON', 0]] },
+  { table: 'appro', titre: 'Approvisionnements', desc: 'Une ligne par boisson approvisionnée. IDapproAB = N° de l\'appro (ex : 26-3).',
+    cols: ['IDapproAB', 'ref', 'Lib', 'qte', 'pu', 'prixFour', 'totalFour', 'dateappro', 'agent', 'fourniss'],
+    ex: [['26-1', '0001CO', 'COCA COLA BOUTEILLE 33', 24, 500, 350, 8400, '12/09/2026', 'ADMIN', 'SOLIBRA'], ['26-1', '0002BA', 'BANANE', 30, 200, 150, 4500, '12/09/2026', 'ADMIN', '']] },
+  { table: 'T_Ventes', titre: 'Ventes journalières (entête)', desc: 'Une ligne par journée de vente. DateVente = jour de la vente, DATEENREG = jour de l\'enregistrement.',
+    cols: ['NumVentes', 'DateVente', 'DATEENREG', 'TotalVentes', 'TotalAchat', 'Benefice', 'WAVE', 'OM', 'ESPECE', 'CREDIT', 'Fermer'],
+    ex: [['V26-5', '14/09/2026', '14/09/2026', 163600, 129550, 34050, 10000, 5000, 146100, 2500, 'OUI'], ['V26-6', '15/09/2026', '16/09/2026', 243500, 197625, 45875, 0, 0, 243500, 0, 'OUI']] },
+  { table: 'T_Inventaire', titre: 'Détail des ventes', desc: 'Une ligne par boisson vendue. NumInventaire = N° de la vente (même valeur que NumVentes).',
+    cols: ['NumInventaire', 'DateInventaire', 'DATEENREG', 'ref', 'libelle', 'StockHier', 'StockApproHier', 'StockHierMatin', 'StockPhysiqueActuel', 'StockVendu', 'PrixUnitaire', 'TotalPV', 'PrixAchat', 'TotalAchat', 'Benefice'],
+    ex: [['V26-5', '14/09/2026', '14/09/2026', '0002BA', 'BANANE', 299, 0, 299, 289, 10, 200, 2000, 150, 1500, 500]] },
+  { table: 'client', titre: 'Créanciers (clients)', desc: 'Liste des créanciers.', cols: ['numCli', 'Nomprenom', 'contact', 'quartier'],
+    ex: [['1', 'KONAN JEAN LUC', '0682252552', ''], ['2', 'JEAN FRANCOIS', '0802639874', '']] },
+  { table: 'creancier', titre: 'Crédits accordés', desc: 'Une ligne par crédit accordé à un créancier.', cols: ['nomcreancier', 'montantcreance', 'motifcreance', 'datecreance'],
+    ex: [['KONAN JEAN LUC', 2500, 'Boissons', '14/09/2026']] },
+  { table: 'paiement', titre: 'Paiements des crédits', desc: 'Une ligne par paiement reçu d\'un créancier.', cols: ['client', 'payer', 'datepaiement'],
+    ex: [['KONAN JEAN LUC', 1000, '20/09/2026']] },
+  { table: 'CompteCreances', titre: 'Soldes des créanciers', desc: 'Facultatif : sinon utilisez « Recalculer les soldes des créanciers » après l\'import.', cols: ['Nomprenom', 'MontantCredit'],
+    ex: [['KONAN JEAN LUC', 1500]] },
+  { table: 'DEPENSES', titre: 'Types de dépenses', desc: 'Liste des noms de dépenses.', cols: ['NOMDEPENSE'], ex: [['TRANSPORT'], ['GLACE'], ['ELECTRICITE']] },
+  { table: 'DEPENSEQUOTIDIEN', titre: 'Dépenses quotidiennes', desc: 'Une ligne par dépense.', cols: ['DEPENSE', 'MONTANT', 'DETAILS', 'AGENTS', 'DATEDEP'],
+    ex: [['TRANSPORT', 1500, 'Livraison casiers', 'ADMIN', '14/09/2026']] },
+  { table: 'VERSEMENTINTERNE', titre: 'Fermetures de caisse', desc: 'Une ligne par journée fermée.',
+    cols: ['DATEVERSE', 'MTJRCTN', 'MTDEPENSES', 'CREANCES', 'CREDITSPAYES', 'FONDSDECAISSEHIER', 'SOMMES', 'MTVERSER', 'ECART', 'HEUREVERSE', 'AGENTS'],
+    ex: [['14/09/2026', 163600, 3650, 2500, 0, 0, 157450, 157450, 0, '22:44', 'ADMIN']] },
+  { table: 'T_Utilisateur', titre: 'Utilisateurs', desc: 'Le mot de passe (mdp) sera chiffré à la première connexion. NomGroupe : SUPERADMIN, ADMINISTRATEUR ou CAISSIER.',
+    cols: ['Nom', 'Prenom', 'Login', 'mdp', 'NomGroupe'], ex: [['KONE', 'AWA', 'awa', '1234', 'CAISSIER']] },
+];
+
+function modeleWorkbook(avecExemples) {
+  const wb = XLSX.utils.book_new();
+  const lisez = [
+    ['MODÈLE D\'IMPORTATION — LE REPOS DU FORESTIER'],
+    [''],
+    ['Comment remplir ce fichier :'],
+    ['1. Chaque feuille correspond à une table. Ne renommez pas les feuilles ni les titres de colonnes (ligne 1).'],
+    ['2. Remplissez une ligne par enregistrement à partir de la ligne 2. ' + (avecExemples ? 'Remplacez ou supprimez les lignes d\'exemple.' : '')],
+    ['3. Dates au format JJ/MM/AAAA (ex : 14/09/2026). Montants sans espace ni « F » (ex : 163600).'],
+    ['4. Les feuilles que vous ne remplissez pas peuvent être laissées vides ou supprimées.'],
+    ['5. Dans l\'application : Administration → Importation des données → choisir ce fichier → vérifier → Lancer l\'importation.'],
+    ['6. Après l\'import des crédits et paiements : cliquer sur « Recalculer les soldes des créanciers ».'],
+    ['7. Vérifier ensuite les compteurs dans Administration → Numéros automatiques.'],
+    [''],
+    ['Feuille', 'Contenu'],
+    ...MODELE.map((m) => [m.table, m.titre + ' — ' + m.desc]),
+  ];
+  const wsL = XLSX.utils.aoa_to_sheet(lisez);
+  wsL['!cols'] = [{ wch: 22 }, { wch: 120 }];
+  XLSX.utils.book_append_sheet(wb, wsL, 'LISEZ-MOI');
+  for (const m of MODELE) {
+    const ws = XLSX.utils.aoa_to_sheet([m.cols, ...(avecExemples ? m.ex : [])]);
+    ws['!cols'] = m.cols.map((c, i) => ({ wch: Math.max(c.length + 2, ...m.ex.map((r) => String(r[i] ?? '').length + 2), 10) }));
+    XLSX.utils.book_append_sheet(wb, ws, m.table);
+  }
+  return XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+}
+
+router.get('/modele-import', (req, res) => res.json(MODELE));
+router.get('/modele-import.xlsx', (req, res) => {
+  const ex = req.query.vide !== '1';
+  res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.setHeader('Content-Disposition', `attachment; filename="modele-import-forestier${ex ? '-exemple' : '-vide'}.xlsx"`);
+  res.send(modeleWorkbook(ex));
+});
 
 router.get('/export-complet.xlsx', h(async (req, res) => {
   const meta = await tablesMeta();
@@ -389,6 +457,11 @@ router.post('/import/executer', upload.single('fichier'), h(async (req, res) => 
       }
     }
     await resetSequences(client);
+    // Les anciennes ventes importées sont considérées comme fermées (sauf la plus récente si sa caisse n'est pas importée)
+    if (rapport.tables.T_Ventes) {
+      await client.query(`UPDATE "T_Ventes" SET "Fermer"=true WHERE "DateVente" < (SELECT MAX("DateVente") FROM "T_Ventes")`);
+      await client.query(`UPDATE "T_Ventes" v SET "Fermer"=true WHERE EXISTS (SELECT 1 FROM "VERSEMENTINTERNE" f WHERE f."DATEVERSE"=v."DateVente")`);
+    }
     // Les approvisionnements importés sont considérés comme déjà pris en compte dans les ventes passées
     if (opts.marquerAppros !== false) await client.query(`UPDATE "appro" SET "NumVente"='IMPORT' WHERE "NumVente" IS NULL AND dateappro <= (SELECT MAX("DateVente") FROM "T_Ventes")`);
     await client.query('COMMIT');

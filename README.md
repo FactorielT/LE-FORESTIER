@@ -18,6 +18,17 @@ Elle reprend la structure de la base de l'ancienne application WinDev (`MyColoMa
 | **Administration** | Numéros automatiques paramétrables (compteurs + formats `V{AA}-{N}`, `{AA}-{N4}`…), utilisateurs & groupes, blocage de l'application. |
 | **Superadmin** | **Importation des données existantes** (.sql, .xlsx, .csv) et **Explorateur de la BD** : liste de toutes les tables, données modifiables comme dans Excel (Entrée/Tab/flèches, collage depuis Excel), ajout/suppression de lignes, export CSV, sauvegarde complète en Excel. |
 
+## Règles de la journée (ordre de travail)
+1. **Approvisionnement** de la journée (s'il y en a eu) — l'application le demande avant chaque nouvelle vente.
+2. **Vente** de la journée (une seule par date, dates saisies dans l'ordre ; la date de vente peut être antérieure à la date d'enregistrement).
+3. **Dépenses** (s'il y en a).
+4. **Créances** individuelles (s'il y en a) : leur total doit être **égal au Total crédit** saisi dans la vente. Si les créances sont saisies avant la vente, le Total crédit est rempli automatiquement.
+5. **Fermeture de caisse** : refusée s'il n'y a pas de vente ou si les créances ne correspondent pas au crédit de la vente.
+
+- Tant que la caisse d'une vente n'est pas fermée : **aucune nouvelle vente** n'est possible, mais cette vente **peut être modifiée** (même numéro, même date d'enregistrement).
+- Après la fermeture : la vente, les approvisionnements, dépenses, créances et paiements de ce jour ne peuvent plus être saisis ni modifiés (seule la dernière journée peut être rouverte par un administrateur).
+- Chaque bouton de validation pose une question **Oui / Non** ; après validation, un message de confirmation s'affiche **2 secondes**.
+
 ## Droits
 - Groupe contenant **SUPER** → super administrateur (tout + import + explorateur BD)
 - Groupe contenant **ADMIN** → administrateur (quantités de stock, suppressions, administration)
@@ -42,6 +53,7 @@ Les tables sont créées automatiquement au démarrage (script `src/schema.sql` 
 3. Ouvrir l'URL, se connecter en `superadmin`, puis **Administration → Importation des données**.
 
 ## Importer les données de l'ancienne application
+- **Modèle Excel** : dans *Administration → Importation des données*, téléchargez le « Modèle avec exemples » ou le « Modèle vide » (une feuille par table + une feuille LISEZ-MOI), remplissez-le puis importez-le.
 - **Script SQL** : exporter les tables HFSQL en SQL (instructions `INSERT INTO`). Les noms de tables/colonnes sont reconnus sans tenir compte des majuscules ; l'encodage Windows (accents) est géré.
 - **Excel** : un classeur avec une feuille par table (nom de feuille = nom de table) — c'est aussi le format de la *Sauvegarde complète*.
 - **CSV** : un fichier par table, 1re ligne = noms des colonnes, séparateur `;` ou `,`. Dates `JJ/MM/AAAA` ou `AAAAMMJJ` acceptées.

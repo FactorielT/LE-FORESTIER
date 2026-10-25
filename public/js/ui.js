@@ -66,6 +66,7 @@ const UI = (() => {
     search: '<circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/>',
     eye: '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
     down: '<path d="M12 5v14M5 12l7 7 7-7"/>',
+    help: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 1 1 3.5 2.3c-.6.3-1 .9-1 1.5V14M12 17h.01"/>',
     info: '<circle cx="12" cy="12" r="9"/><path d="M12 16v-4M12 8h.01"/>',
     warn: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01"/>',
     edit: '<path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
@@ -82,7 +83,8 @@ const UI = (() => {
     el.className = 'toast ' + type;
     el.innerHTML = (type === 'err' ? ic('warn') : type === 'ok' ? ic('check') : ic('info')) + `<span>${esc(msg)}</span>`;
     $('#toast-root').appendChild(el);
-    setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 320); }, type === 'err' ? 5200 : 3000);
+    // Toast de succès : 2 secondes ; erreur : 5 secondes
+    setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, type === 'err' ? 5000 : type === 'ok' ? 2000 : 2500);
   }
   const ok = (m) => toast(m, 'ok');
   const err = (e) => toast(e && e.message ? e.message : String(e), 'err');
@@ -111,11 +113,12 @@ const UI = (() => {
       setTimeout(() => m.$('[data-ok]').focus(), 30);
     });
   }
-  function confirm(msg, { title = 'Confirmation', okText = 'Oui', danger = false } = {}) {
+  // Question Oui / Non avant chaque validation
+  function confirm(msg, { title = 'Confirmation', okText = 'Oui', noText = 'Non', danger = false } = {}) {
     return new Promise((res) => {
       let done = false;
-      const m = modal({ title, body: `<div class="alert-msg">${ic(danger ? 'warn' : 'info')}<div>${msg}</div></div>`,
-        foot: `<button class="btn sec" data-close>Annuler</button><button class="btn ${danger ? 'red' : ''}" data-ok>${esc(okText)}</button>`,
+      const m = modal({ title, body: `<div class="alert-msg">${ic(danger ? 'warn' : 'help')}<div>${msg}</div></div>`,
+        foot: `<button class="btn sec" data-close>${esc(noText)}</button><button class="btn ${danger ? 'red' : ''}" data-ok>${esc(okText)}</button>`,
         onClose: () => { if (!done) res(false); } });
       m.$('[data-ok]').addEventListener('click', () => { done = true; m.close(); res(true); });
     });
@@ -165,5 +168,6 @@ const UI = (() => {
     return { get: () => n(input.value), set: (v) => { input.value = money(v); } };
   }
 
-  return { $, $$, esc, api, get, post, put, del, n, money, qty, today, addDays, firstOfMonth, dfr, dlong, hm, ic, toast, ok, err, modal, alert, confirm, table, loading, sum, moneyInput };
+  const ask = (msg, o = {}) => confirm(msg, { title: 'Confirmation', ...o });
+  return { ask, $, $$, esc, api, get, post, put, del, n, money, qty, today, addDays, firstOfMonth, dfr, dlong, hm, ic, toast, ok, err, modal, alert, confirm, table, loading, sum, moneyInput };
 })();

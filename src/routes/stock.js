@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { q, tx } = require('../db');
-const { admin, isAdmin, h, fail, num, today, nowTime, moisDe, anneeDe, isDate, nextNumero } = require('../util');
+const { admin, isAdmin, h, fail, num, today, nowTime, moisDe, anneeDe, isDate, nextNumero, verifierJourOuvert } = require('../util');
 
 const SEL_PRODUIT = `SELECT rid, ref, "Lib", COALESCE(qte,0) qte, COALESCE(pu,0) pu, COALESCE("prixFour",0) "prixFour",
   code, typeemballage, COALESCE("PRIXEMBALLAGE",0) "PRIXEMBALLAGE" FROM "produit"`;
@@ -68,7 +68,9 @@ router.post('/appros', h(async (req, res) => {
   if (!isDate(date)) throw fail("Date d'achat invalide.");
   const items = (lignes || []).filter((l) => num(l.qte) > 0);
   if (!items.length) throw fail('Ajoutez au moins une boisson avec une quantité.');
+  if (date > today()) throw fail("La date d'achat ne peut pas être dans le futur.");
   const out = await tx(async (c) => {
+    await verifierJourOuvert(c, date, 'un approvisionnement');
     const numero = await nextNumero(c, 'Numappro', 'format_appro', date, `SELECT 1 FROM "appro" WHERE "IDapproAB"=$1`);
     let qteT = 0, totT = 0;
     for (const l of items) {
@@ -88,7 +90,9 @@ router.post('/appros', h(async (req, res) => {
       qteT += qte;
       totT += totalFour;
     }
-    return { numero, qte: qteT, total: totT };
+    const v = (await c.query(`SELECT "NumVentes", "DateVente" FROM "T_Ventes" WHERE "DateVente" >= $1 AND COALESCE("Fermer",false)=false ORDER BY "DateVente" LIMIT 1`, [date])).rows[0];
+    const avertissement = v ? `La vente ${v.NumVentes} du ${v.DateVente.split('-').reverse().join('/')} est déjà saisie : ouvrez-la dans Ventes et validez-la à nouveau (modification) pour qu'elle prenne en compte cet approvisionnement.` : null;
+    return { numero, qte: qteT, total: totT, avertissement };
   });
   res.json(out);
 }));

@@ -86,6 +86,18 @@ async function nextNumero(client, colonne, cleFormat, dateIso, existsSql, lib) {
   return numero;
 }
 
+// Une journée est "fermée" si sa caisse a été fermée
+async function estFermee(c, date) {
+  const r = await c.query(`SELECT (EXISTS (SELECT 1 FROM "VERSEMENTINTERNE" WHERE "DATEVERSE"=$1)
+    OR EXISTS (SELECT 1 FROM "T_Ventes" WHERE "DateVente"=$1 AND "Fermer"=true)) f`, [date]);
+  return r.rows[0].f;
+}
+async function verifierJourOuvert(c, date, quoi) {
+  if (await estFermee(c || { query: q }, date)) {
+    throw fail(`La caisse du ${String(date).split('-').reverse().join('/')} est déjà fermée : impossible d'enregistrer ${quoi} à cette date.`);
+  }
+}
+
 // Wrapper async pour Express
 const h = (fn) => (req, res) =>
   Promise.resolve(fn(req, res)).catch((e) => {
@@ -101,5 +113,5 @@ function fail(message, status = 400) {
 
 module.exports = {
   SECRET, today, nowTime, moisDe, anneeDe, isDate, num, roleOf, auth, admin, superadmin, isAdmin,
-  getParam, formatNumero, nextNumero, h, fail,
+  getParam, formatNumero, nextNumero, h, fail, estFermee, verifierJourOuvert,
 };

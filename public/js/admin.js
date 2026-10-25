@@ -55,6 +55,7 @@
           <p class="muted">Exemples : <code>V{AA}-{N}</code> → V26-5 · <code>{AA}-{N4}</code> → 26-0001</p></div>
         <div class="btn-bar"><button class="btn lg" id="n-save">${ic('check')} Enregistrer</button></div>`;
       $('#n-save').addEventListener('click', async () => {
+        if (!(await UI.ask('Enregistrer les numéros et formats ?'))) return;
         const numero = {}, formats = {};
         $$('[data-n]').forEach((i) => (numero[i.dataset.n] = i.value));
         $$('[data-f]').forEach((i) => (formats[i.dataset.f] = i.value));
@@ -71,6 +72,7 @@
       el.innerHTML = `<div class="card" style="max-width:560px"><div class="field"><label>Nom de l'établissement</label><input class="input" id="p-nom" value="${esc(p.nom_etablissement || '')}"></div>
         <button class="btn" id="p-save">${ic('check')} Enregistrer</button></div>`;
       $('#p-save').addEventListener('click', async () => {
+        if (!(await UI.ask('Enregistrer ce paramètre ?'))) return;
         try { await put('/admin/parametres', { cle: 'nom_etablissement', valeur: $('#p-nom').value }); ok('Paramètre enregistré (rechargez la page pour voir le changement).'); } catch (x) { err(x); }
       });
     },
@@ -106,12 +108,13 @@
           <div class="field"><label>Groupe</label><select class="input" name="NomGroupe">${groupes.map((g) => `<option ${g.libelle === u.NomGroupe ? 'selected' : ''}>${esc(g.libelle)}</option>`).join('')}</select></div>`,
         foot: `${!isNew ? `<button class="btn red" data-del>${ic('trash')} Supprimer</button>` : ''}<button class="btn sec" data-close>Annuler</button><button class="btn" data-ok>${ic('check')} Enregistrer</button>` });
         m.$('[data-ok]').addEventListener('click', async () => {
+          if (!(await UI.ask(isNew ? 'Créer cet utilisateur ?' : 'Enregistrer les modifications de cet utilisateur ?'))) return;
           const b = {}; m.$$('input,select').forEach((i) => (b[i.name] = i.value));
           try { if (isNew) await post('/admin/utilisateurs', b); else await put('/admin/utilisateurs/' + u.id, b); ok('Utilisateur enregistré.'); m.close(); load(); } catch (x) { err(x); }
         });
         const d = m.$('[data-del]');
         if (d) d.addEventListener('click', async () => {
-          if (!(await confirm(`Supprimer l'utilisateur <b>${esc(u.Login)}</b> ?`, { danger: true, okText: 'Supprimer' }))) return;
+          if (!(await confirm(`Supprimer l'utilisateur <b>${esc(u.Login)}</b> ?`, { danger: true, okText: 'Oui' }))) return;
           try { await del('/admin/utilisateurs/' + u.id); ok('Utilisateur supprimé.'); m.close(); load(); } catch (x) { err(x); }
         });
       }
@@ -119,7 +122,10 @@
       $('#g-add').addEventListener('click', () => {
         const m = modal({ title: 'Nouveau groupe', body: `<div class="field"><label>Libellé</label><input class="input" name="l" placeholder="ex : CAISSIER"></div>`,
           foot: `<button class="btn sec" data-close>Annuler</button><button class="btn" data-ok>Enregistrer</button>` });
-        m.$('[data-ok]').addEventListener('click', async () => { try { await post('/admin/groupes', { libelle: m.$('[name=l]').value }); m.close(); load(); } catch (x) { err(x); } });
+        m.$('[data-ok]').addEventListener('click', async () => {
+          if (!(await UI.ask('Créer ce groupe ?'))) return;
+          try { await post('/admin/groupes', { libelle: m.$('[name=l]').value }); ok('Groupe créé.'); m.close(); load(); } catch (x) { err(x); }
+        });
       });
       await load();
     },
@@ -130,7 +136,14 @@
     title: 'Importation des données', back: '/admin', role: 'superadmin',
     async render(el) {
       el.innerHTML = `<div class="card">
-        <div class="card-title">${ic('upload')} Importer les données de l'ancienne application</div>
+        <div class="card-title">${ic('download')} 1. Fichier Excel exemple à pré-remplir</div>
+        <p style="margin-top:0">Téléchargez le modèle, recopiez-y vos données (une feuille par table, sans changer les titres des colonnes), puis importez-le ci-dessous.
+          La feuille <b>LISEZ-MOI</b> explique comment le remplir.</p>
+        <div class="row"><a class="btn" href="/api/data/modele-import.xlsx">${ic('download')} Modèle avec exemples</a>
+          <a class="btn sec" href="/api/data/modele-import.xlsx?vide=1">${ic('download')} Modèle vide</a></div>
+        <div id="tpl-prev" style="margin-top:12px"></div></div>
+        <div class="card">
+        <div class="card-title">${ic('upload')} 2. Importer les données de l'ancienne application</div>
         <div class="notice info">${ic('info')}<div>Formats acceptés :
           <ul style="margin:6px 0 0;padding-left:18px"><li><b>Script SQL</b> (.sql) contenant des instructions <code>INSERT INTO …</code> (export WinDev / HFSQL vers SQL).</li>
           <li><b>Excel</b> (.xlsx / .xls) : une feuille par table (le nom de la feuille ou les colonnes permettent de reconnaître la table).</li>
@@ -140,6 +153,23 @@
         <div class="row" style="margin-top:12px;align-items:center"><button class="btn sec sm" id="i-recalc">${ic('refresh')} Recalculer les soldes des créanciers</button>
           <span class="muted">À utiliser après l'import des crédits et paiements (solde = crédits − paiements).</span></div></div>
         <div id="i-zone"></div>`;
+      // Aperçu du modèle façon Excel (onglets = feuilles)
+      try {
+        const modele = await get('/data/modele-import');
+        let cur = 0;
+        const drawTpl = () => {
+          const m = modele[cur];
+          const L = (i) => String.fromCharCode(65 + i);
+          $('#tpl-prev').innerHTML = `<div class="muted" style="margin-bottom:4px"><b style="color:var(--ink)">${esc(m.table)}</b> — ${esc(m.titre)} : ${esc(m.desc)}</div>
+            <div class="xl-prev"><table><thead><tr><th class="rn"></th>${m.cols.map((c, i) => `<th class="rn" style="background:#eef1ee;color:#777">${L(i)}</th>`).join('')}</tr></thead><tbody>
+              <tr><td class="rn">1</td>${m.cols.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>
+              ${m.ex.map((r, k) => `<tr><td class="rn">${k + 2}</td>${r.map((v) => `<td>${esc(v)}</td>`).join('')}</tr>`).join('')}
+              <tr><td class="rn">${m.ex.length + 2}</td>${m.cols.map(() => '<td>&nbsp;</td>').join('')}</tr></tbody></table>
+            <div class="xl-tabs">${modele.map((x, i) => `<button type="button" data-tab="${i}" class="${i === cur ? 'on' : ''}">${esc(x.table)}</button>`).join('')}</div></div>`;
+          $$('#tpl-prev [data-tab]').forEach((b) => b.addEventListener('click', () => { cur = Number(b.dataset.tab); drawTpl(); }));
+        };
+        drawTpl();
+      } catch {}
       let file = null, analyse = null;
       $('#i-recalc').addEventListener('click', async () => {
         if (!(await confirm('Recalculer le solde de tous les créanciers à partir des crédits et des paiements enregistrés ?'))) return;
@@ -197,7 +227,7 @@
           table: $('[data-table]', card).value,
           mapping: Object.fromEntries($$('[data-e]', card).map((s) => [s.dataset.e, s.value])),
         }));
-        if (!(await confirm(opts.vider ? '<b>Attention</b> : les tables concernées seront vidées avant l\'import. Continuer ?' : 'Lancer l\'importation ?', { danger: opts.vider, okText: 'Importer' }))) return;
+        if (!(await confirm(opts.vider ? '<b>Attention</b> : les tables concernées seront vidées avant l\'import. Continuer ?' : 'Lancer l\'importation ?', { danger: opts.vider, okText: 'Oui' }))) return;
         const fd = new FormData(); fd.append('fichier', file); fd.append('options', JSON.stringify(opts));
         const b = $('#i-run'); b.disabled = true; b.innerHTML = 'Importation en cours…';
         try {
@@ -375,7 +405,7 @@
       });
       $('#x-del').addEventListener('click', async () => {
         const ids = [...selRows].map((i) => data.rows[i][data.pk]);
-        if (!(await confirm(`Supprimer définitivement ${ids.length} ligne(s) de la table <b>${esc(cur)}</b> ?`, { danger: true, okText: 'Supprimer' }))) return;
+        if (!(await confirm(`Supprimer définitivement ${ids.length} ligne(s) de la table <b>${esc(cur)}</b> ?`, { danger: true, okText: 'Oui' }))) return;
         try {
           const r = await post(`/data/table/${encodeURIComponent(cur)}/delete`, { ids });
           ok(`${r.deleted} ligne(s) supprimée(s).`);

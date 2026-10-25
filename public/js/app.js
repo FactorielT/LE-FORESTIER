@@ -61,6 +61,12 @@ const App = (() => {
     setTimeout(() => f.login.focus(), 50);
   }
 
+  async function deconnexion() {
+    if (!(await UI.ask('Voulez-vous vous déconnecter de l\'application ?', { title: 'Déconnexion' }))) return;
+    await logout();
+    UI.ok('Vous êtes déconnecté.');
+  }
+
   async function logout(silent) {
     if (!silent) { try { await post('/logout'); } catch {} }
     user = null;
@@ -83,7 +89,8 @@ const App = (() => {
       <div class="main">
         <header class="topbar"><button class="ib menu-btn" aria-label="Menu">${ic('menu')}</button>
           <button class="ib back-btn hidden" aria-label="Retour">${ic('back')}</button><h1 id="page-title"></h1>
-          <button class="ib" data-home title="Accueil">${ic('home')}</button></header>
+          <button class="ib" data-home title="Accueil">${ic('home')}</button>
+          <button class="ib out-btn" data-logout-top title="Déconnexion">${ic('logout')}<span>Déconnexion</span></button></header>
         <main class="content" id="page"></main>
       </div></div>`;
     const shell = $('.shell');
@@ -91,7 +98,8 @@ const App = (() => {
     $('.menu-btn').addEventListener('click', () => { shell.classList.add('nav-open'); $('.scrim').classList.remove('hidden'); });
     $('.scrim').addEventListener('click', closeNav);
     $$('.sidebar nav a').forEach((a) => a.addEventListener('click', closeNav));
-    $('[data-logout]').addEventListener('click', () => logout());
+    $('[data-logout]').addEventListener('click', deconnexion);
+    $('[data-logout-top]').addEventListener('click', deconnexion);
     $('[data-home]').addEventListener('click', () => go('/'));
     $('[data-pwd]').addEventListener('click', changePwd);
     $('.back-btn').addEventListener('click', () => {
@@ -107,6 +115,7 @@ const App = (() => {
       <div class="field"><label>Confirmer</label><input class="input" type="password" name="c"></div>`,
     foot: `<button class="btn sec" data-close>Annuler</button><button class="btn" data-ok>${ic('check')} Enregistrer</button>` });
     m.$('[data-ok]').addEventListener('click', async () => {
+      if (!(await UI.ask('Changer votre mot de passe ?'))) return;
       const a = m.$('[name=a]').value, nv = m.$('[name=n]').value, c = m.$('[name=c]').value;
       if (nv !== c) return err('La confirmation ne correspond pas.');
       try { await post('/me/password', { ancien: a, nouveau: nv }); UI.ok('Mot de passe modifié.'); m.close(); } catch (x) { err(x); }
@@ -150,5 +159,5 @@ const App = (() => {
   window.addEventListener('hashchange', route);
   document.addEventListener('DOMContentLoaded', start);
 
-  return { go, logout, isAdmin, isSuper, get user() { return user; }, get nom() { return nomEtab; }, parseHash };
+  return { go, logout, deconnexion, isAdmin, isSuper, get user() { return user; }, get nom() { return nomEtab; }, parseHash };
 })();

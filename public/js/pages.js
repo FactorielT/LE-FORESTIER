@@ -4,6 +4,7 @@ const Pages = {};
   const { $, $$, esc, ic, get, post, put, del, n, money, qty, today, addDays, dfr, dlong, hm, toast, ok, err, modal, alert, confirm, table, sum, moneyInput, firstOfMonth } = UI;
   const go = (...a) => App.go(...a);
   const adminOnly = () => App.isAdmin();
+  const approVerifie = new Set(); // dates pour lesquelles la question de l'appro a été posée
 
   // Petit utilitaire : sélecteur de période
   const periode = (du, au, extra = '') => `<div class="toolbar">
@@ -41,13 +42,15 @@ const Pages = {};
           </div>
           <div class="hero-actions">
             <a class="hbtn" href="#/ventes">${ic('cart')}<span>Saisir une vente</span></a>
+            <a class="hbtn" href="#/stock">${ic('box')}<span>Stock</span></a>
             <a class="hbtn" href="#/appro">${ic('truck')}<span>Approvisionner</span></a>
             <a class="hbtn" href="#/depenses">${ic('wallet')}<span>Dépense</span></a>
             <a class="hbtn" href="#/caisse">${ic('power')}<span>Fermer la caisse</span></a>
+            <button class="hbtn hbtn-out" type="button" data-logout2>${ic('logout')}<span>Déconnexion</span></button>
           </div>
         </section>
         <div id="h-alerts"></div>
-        <div class="kpis" id="h-kpi">${'<div class="kpi sk"></div>'.repeat(4)}</div>
+        <div class="kpis" id="h-kpi">${'<div class="kpi sk"></div>'.repeat(5)}</div>
         <div class="home-grid">
           <div class="card chart-card"><div class="card-title">${ic('chart')} Ventes des 14 derniers jours <a href="#/stats" class="link-more">Statistiques ›</a></div>
             <div class="chart-box"><canvas id="h-chart"></canvas></div><div id="h-chart-data"></div></div>
@@ -55,6 +58,7 @@ const Pages = {};
         </div>
         <div class="section-h">Modules</div>
         <div class="tiles">${tiles.map((x) => `<a class="tile" href="#${x.r}"><div class="ic ${x.c}">${ic(x.i)}</div><b>${x.t}</b></a>`).join('')}</div>`;
+      $('[data-logout2]').addEventListener('click', () => App.deconnexion());
       let d;
       try { d = await get('/dashboard'); } catch (x) { $('#h-kpi').innerHTML = ''; return; }
       // Alertes
@@ -73,7 +77,8 @@ const Pages = {};
         kpi('Ventes du mois', money(d.mois.ventes), `${d.mois.nb} jour(s) enregistré(s)`, 'cart', 'c1') +
         kpi('Bénéfice du mois', money(d.mois.benefice), d.mois.ventes ? `Marge ${Math.round((d.mois.benefice / d.mois.ventes) * 100)} %` : '—', 'chart', 'c4') +
         kpi('Dépenses du mois', money(d.mois.depenses), 'Dépenses quotidiennes', 'wallet', 'c5') +
-        kpi('Créances en cours', money(d.creances.total), `${d.creances.nb} créancier(s)`, 'card', 'c6');
+        kpi('Créances en cours', money(d.creances.total), `${d.creances.nb} créancier(s)`, 'card', 'c6') +
+        `<a class="kpi kpi-link" href="#/stock"><div class="kpi-ic c2">${ic('box')}</div><div><small>Stock (valeur de vente)</small><b>${money(d.stock.valeur)}</b><span>${d.stock.n} article(s)${d.stock.faibles.length ? ` · <em style="color:var(--red);font-style:normal">${d.stock.faibles.length} faible(s)</em>` : ''}</span></div></a>`;
       // Graphique
       const lab = d.serie.map((x) => x.d.slice(8, 10) + '/' + x.d.slice(5, 7));
       Charts.combo($('#h-chart'), lab, [
@@ -134,6 +139,22 @@ const Pages = {};
           : 'Aucune vente enregistrée pour le moment.';
         const nx = $('#v-next');
         if (nx) nx.addEventListener('click', (e) => { e.preventDefault(); $('#v-date').value = data.prochaine; afficher().catch(err); });
+        if (data.bloque) {
+          if (first0) {
+            // La dernière vente n'est pas fermée : on l'ouvre directement (modification possible)
+            first0 = false;
+            $('#v-date').value = data.derniere.date;
+            toast(`La vente du ${dfr(data.derniere.date)} n'est pas encore fermée : vous pouvez la modifier ou fermer sa caisse.`);
+            return afficher();
+          }
+          zone.innerHTML = `<div class="notice err">${ic('lock')}<div>${esc(data.erreur)}</div></div>
+            <div class="btn-bar"><button class="btn blue" id="v-mod">${ic('edit')} Voir / modifier la vente ${esc(data.derniere.numero)}</button>
+            <button class="btn red" id="v-fer">${ic('power')} Fermer la caisse du ${dfr(data.derniere.date)}</button></div>`;
+          $('#v-mod').addEventListener('click', () => { $('#v-date').value = data.derniere.date; afficher().catch(err); });
+          $('#v-fer').addEventListener('click', () => go('/caisse', { date: data.derniere.date }));
+          return;
+        }
+        first0 = false;
         if (data.erreur) {
           zone.innerHTML = `<div class="notice err">${ic('warn')}<div>${esc(data.erreur)}</div></div>
             ${data.prochaine && data.prochaine <= today() ? `<div class="btn-bar"><button class="btn" id="v-go">${ic('cart')} Saisir la vente du ${dfr(data.prochaine)}</button></div>` : ''}`;
@@ -141,26 +162,41 @@ const Pages = {};
           if (g) g.addEventListener('click', () => { $('#v-date').value = data.prochaine; afficher().catch(err); });
           return;
         }
-        if (data.existe) {
-          zone.innerHTML = `<div class="notice ok">${ic('check')}<div>La vente du <b>${dfr(date)}</b> est déjà enregistrée sous le N° <b>${esc(data.existe.NumVentes)}</b>
-            le ${dfr(data.existe.DATEENREG)} (Total : <b>${money(data.existe.TotalVentes)}</b>). Une seule vente est enregistrée par journée.</div></div>
+        if (data.existe && data.fermee) {
+          zone.innerHTML = `<div class="notice ok">${ic('lock')}<div>La vente du <b>${dfr(date)}</b> est enregistrée sous le N° <b>${esc(data.existe.NumVentes)}</b>
+            le ${dfr(data.existe.DATEENREG)} (Total : <b>${money(data.existe.TotalVentes)}</b>) et sa <b>caisse est fermée</b> : elle ne peut plus être modifiée.</div></div>
             <div class="btn-bar"><button class="btn blue" id="v-det">${ic('eye')} Voir le détail</button></div>`;
           $('#v-det').addEventListener('click', () => go('/bilans/ventes/detail', { numero: data.existe.NumVentes }));
           return;
         }
+        modif = data.modification ? data.existe : null;
+        // Rappel : l'approvisionnement de la journée doit être saisi AVANT la vente
+        if (!modif && !approVerifie.has(date)) {
+          const oui = await confirm(`Avant de saisir la vente du <b>${dlong(date)}</b> :<br><br>Y a-t-il eu un <b>approvisionnement</b> ce jour-là qui n'est pas encore enregistré ?<br><span class="muted">S'il y en a eu, il doit être enregistré avant la vente.</span>`,
+            { title: 'Approvisionnement de la journée', okText: "Oui, enregistrer l'appro", noText: 'Non, continuer' });
+          approVerifie.add(date);
+          if (oui) return go('/appro', { date, retour: 'vente' });
+        }
         const draft = loadDraft();
-        if (data.prochaine && date > data.prochaine) {
+        if (!modif && data.prochaine && date > data.prochaine) {
           zone.dataset.gap = `Attention : aucune vente n'est enregistrée du ${dfr(data.prochaine)} au ${dfr(addDays(date, -1))}. Si l'établissement était ouvert ces jours-là, enregistrez d'abord ces ventes (elles doivent être saisies dans l'ordre des dates).`;
         } else zone.dataset.gap = '';
-        lignes = []; rep = { credit: data.creditJour || 0, wave: 0, om: 0, espece: 0 };
+        lignes = [];
+        rep = modif ? { credit: Number(modif.CREDIT) || 0, wave: Number(modif.WAVE) || 0, om: Number(modif.OM) || 0, espece: Number(modif.ESPECE) || 0 }
+          : { credit: data.creditJour || 0, wave: 0, om: 0, espece: 0 };
+        if (modif) {
+          for (const l of data.lignesExistantes) {
+            const p = data.produits.find((x) => x.rid === l.rid);
+            if (p) lignes.push(calc(p, l.restant));
+          }
+        }
         if (draft && draft.lignes && draft.lignes.length) {
-          // Recalcule le brouillon sur le stock actuel
+          const bl = [];
           for (const l of draft.lignes) {
             const p = data.produits.find((x) => x.rid === l.rid);
-            if (p && n(l.restant) <= p.depart) lignes.push(calc(p, l.restant));
+            if (p && n(l.restant) <= p.depart) bl.push(calc(p, l.restant));
           }
-          rep = { ...rep, ...draft.rep, credit: draft.rep && draft.rep.credit !== undefined ? draft.rep.credit : rep.credit };
-          if (lignes.length) toast('Brouillon de saisie restauré (' + lignes.length + ' boisson(s)).');
+          if (bl.length) { lignes = bl; rep = { ...rep, ...draft.rep }; toast('Saisie en cours restaurée (' + bl.length + ' boisson(s)).'); }
         }
         drawSaisie();
       }
@@ -173,7 +209,10 @@ const Pages = {};
 
       function drawSaisie() {
         zone.innerHTML = `${zone.dataset.gap ? `<div class="notice">${ic('warn')}<div>${esc(zone.dataset.gap)}</div></div>` : ''}
-          <div class="notice info">${ic('info')}<div>Saisie de la vente du <b>${dlong(date)}</b> — enregistrée le <b>${dfr(today())}</b>.</div></div>
+          ${modif ? `<div class="notice">${ic('edit')}<div><b>Modification de la vente N° ${esc(modif.NumVentes)}</b> du ${dlong(date)} (enregistrée le ${dfr(modif.DATEENREG)}).<br>
+            Sa caisse n'est pas encore fermée : vous pouvez corriger les quantités et la répartition, puis valider à nouveau.
+            <div style="margin-top:8px"><button class="btn red sm" id="v-fer2">${ic('power')} Aller à la fermeture de caisse</button></div></div></div>`
+            : `<div class="notice info">${ic('info')}<div>Saisie de la vente du <b>${dlong(date)}</b> — enregistrée le <b>${dfr(today())}</b>.</div></div>`}
           <div class="two-col">
           <div class="card"><div class="card-title">${ic('list')} Liste des boissons <span class="muted" style="margin-left:auto;font-weight:500">Touchez une boisson pour saisir</span></div>
             <div class="search" style="margin-bottom:10px">${ic('search')}<input class="input" id="v-q" placeholder="Rechercher une boisson…"></div>
@@ -194,6 +233,7 @@ const Pages = {};
           ], rows, { onClick: (p) => saisir(p), rowCls: (p) => (lignes.some((l) => l.rid === p.rid) ? 'done' : ''), empty: 'Aucune boisson. Ajoutez des articles dans le Stock.' });
         };
         $('#v-q').addEventListener('input', drawProd);
+        if ($('#v-fer2')) $('#v-fer2').addEventListener('click', () => go('/caisse', { date }));
         drawProd();
         drawLignes();
         zone._drawProd = drawProd;
@@ -232,9 +272,10 @@ const Pages = {};
             <div class="field"><label>Total OM</label><input class="input" id="r-om"></div>
             <div class="field"><label>Total ESPÈCE</label><input class="input" id="r-espece"></div>
           </div>
+          <div class="muted" id="r-cr" style="margin:-4px 0 6px"></div>
           <div class="ecart" id="r-ecart"></div>
           <div class="btn-bar"><button class="btn sec" id="r-auto" title="Mettre le reste en espèces">${ic('wallet')} Reste en espèces</button>
-            <button class="btn lg" id="v-valider" ${lignes.length ? '' : 'disabled'}>${ic('check')} Valider Vente</button></div>
+            <button class="btn lg" id="v-valider" ${lignes.length ? '' : 'disabled'}>${ic('check')} ${modif ? 'Enregistrer les modifications' : 'Valider Vente'}</button></div>
           <p class="muted center" style="margin:8px 0 0">La somme Crédit + Wave + OM + Espèce doit être égale au Total Vente.</p>`;
         const inputs = {};
         for (const k of ['credit', 'wave', 'om', 'espece']) {
@@ -242,6 +283,9 @@ const Pages = {};
           inputs[k].set(rep[k] || 0);
         }
         const majEcart = () => {
+          const cj = data.creditJour || 0;
+          $('#r-cr').innerHTML = `Créances déjà enregistrées pour ce jour : <b>${money(cj)}</b>`
+            + (rep.credit !== cj ? ` · <span style="color:var(--red);font-weight:600">${rep.credit > cj ? `${money(rep.credit - cj)} de créances à saisir dans la rubrique Créances avant la fermeture` : 'le crédit saisi est inférieur aux créances enregistrées'}</span>` : ' ✓');
           const s = rep.credit + rep.wave + rep.om + rep.espece;
           const d = tv - s;
           const e = $('#r-ecart');
@@ -305,24 +349,23 @@ const Pages = {};
         const tv = sum(lignes, 'total');
         const s = rep.credit + rep.wave + rep.om + rep.espece;
         if (s !== tv) return alert(`La somme des 4 champs (Crédit + Wave + OM + Espèce = <b>${money(s)}</b>) doit être égale au Total Vente (<b>${money(tv)}</b>).`, 'Répartition incorrecte');
-        if (!(await confirm(`<b>Date de la vente :</b> ${dlong(date)}<br><b>Date d'enregistrement :</b> ${dlong(today())}<br><br>${lignes.length} boisson(s) · Total <b>${money(tv)}</b><br><span class="muted">La vente d'une journée ne s'enregistre qu'une seule fois.</span>`, { okText: 'Valider la vente', title: 'Valider la vente ?' }))) return;
+        if (!(await confirm(`${modif ? `Enregistrer les modifications de la vente <b>${esc(modif.NumVentes)}</b> ?<br><br>` : 'Valider cette vente ?<br><br>'}<b>Date de la vente :</b> ${dlong(date)}<br><b>Date d'enregistrement :</b> ${dlong(modif ? modif.DATEENREG : today())}<br><br>${lignes.length} boisson(s) · Total <b>${money(tv)}</b> · Crédit <b>${money(rep.credit)}</b>`, { title: modif ? 'Modifier la vente ?' : 'Valider la vente ?' }))) return;
         try {
-          const r = await post('/ventes', { date, lignes: lignes.map((l) => ({ rid: l.rid, restant: l.restant })), ...rep });
+          const r = await post('/ventes', { date, numero: modif ? modif.NumVentes : undefined, lignes: lignes.map((l) => ({ rid: l.rid, restant: l.restant })), ...rep });
           try { localStorage.removeItem(KEY()); } catch {}
-          ok(`Vente ${r.numero} enregistrée.`);
-          const suiv = addDays(date, 1);
-          if (suiv <= today()) {
-            if (await confirm(`Vente enregistrée sous le N° <b>${esc(r.numero)}</b>.<br>Date de vente : <b>${dfr(r.dateVente)}</b> · Enregistrée le : <b>${dfr(r.dateEnreg)}</b><br>Total : <b>${money(r.totalVentes)}</b> · Bénéfice : <b>${money(r.benefice)}</b><br><br>Saisir maintenant la vente du <b>${dfr(suiv)}</b> ?`, { title: 'Vente validée', okText: 'Vente suivante' })) {
-              $('#v-date').value = suiv;
-            }
-          } else {
-            await alert(`Vente enregistrée sous le N° <b>${esc(r.numero)}</b>.<br>Date de vente : <b>${dfr(r.dateVente)}</b> · Enregistrée le : <b>${dfr(r.dateEnreg)}</b><br>Total : <b>${money(r.totalVentes)}</b> · Bénéfice : <b>${money(r.benefice)}</b>`, 'Vente validée');
+          ok(r.modification ? `Vente ${r.numero} modifiée avec succès.` : `Vente ${r.numero} enregistrée avec succès.`);
+          await new Promise((res) => setTimeout(res, 900));
+          if (r.credit !== r.creancesSaisies) {
+            if (await confirm(`Le total crédit de la vente (<b>${money(r.credit)}</b>) n'est pas encore égal aux créances enregistrées individuellement pour le ${dfr(date)} (<b>${money(r.creancesSaisies)}</b>).<br><br>Voulez-vous enregistrer les créances maintenant ?`,
+              { title: 'Créances à enregistrer', okText: 'Oui, saisir les créances' })) return go('/creances/credit', { date });
+          } else if (await confirm(`Voulez-vous passer à la <b>fermeture de caisse</b> du ${dfr(date)} ?<br><span class="muted">Avant la fermeture, enregistrez aussi les dépenses et les créances de la journée s'il y en a.</span>`, { title: 'Fermeture de caisse' })) {
+            return go('/caisse', { date });
           }
           afficher();
         } catch (x) { err(x); }
       }
 
-      let first = true;
+      let first = true, first0 = !params.date, modif = null;
       $('#v-aff').addEventListener('click', () => afficher().catch(err));
       $('#v-date').addEventListener('change', () => afficher().catch(err));
       await afficher();
@@ -371,13 +414,14 @@ const Pages = {};
           <div class="field"><label>Prix achat</label><input class="input big" name="prixFour" inputmode="numeric" value="${p.prixFour}"></div></div>`,
         foot: `${adm ? `<button class="btn red" data-del>${ic('trash')}</button>` : ''}<button class="btn red" data-close>${ic('x')} Fermer</button><button class="btn" data-ok>${ic('check')} Modifier</button>` });
         m.$('[data-ok]').addEventListener('click', async () => {
+          if (!(await UI.ask(`Enregistrer les modifications de l'article <b>${esc(p.Lib)}</b> ?`))) return;
           const b = { pu: n(m.$('[name=pu]').value), prixFour: n(m.$('[name=prixFour]').value) };
           if (adm) { b.qte = n(m.$('[name=qte]').value); b.Lib = m.$('[name=Lib]').value; }
           try { await put('/produits/' + p.rid, b); ok('Article modifié.'); m.close(); load(); } catch (x) { err(x); }
         });
         const d = m.$('[data-del]');
         if (d) d.addEventListener('click', async () => {
-          if (!(await confirm(`Supprimer définitivement l'article <b>${esc(p.Lib)}</b> ?`, { danger: true, okText: 'Supprimer' }))) return;
+          if (!(await confirm(`Supprimer définitivement l'article <b>${esc(p.Lib)}</b> ?`, { danger: true, okText: 'Oui' }))) return;
           try { await del('/produits/' + p.rid); ok('Article supprimé.'); m.close(); load(); } catch (x) { err(x); }
         });
       }
@@ -393,6 +437,7 @@ const Pages = {};
           <div class="field"><label>Prix emballage</label><input class="input" name="PRIXEMBALLAGE" inputmode="numeric"></div></div>`,
         foot: `<button class="btn sec" data-close>Annuler</button><button class="btn" data-ok>${ic('check')} Enregistrer</button>` });
         m.$('[data-ok]').addEventListener('click', async () => {
+          if (!(await UI.ask(`Ajouter l'article <b>${esc(m.$('[name=Lib]').value)}</b> ?`))) return;
           const b = {}; m.$$('input').forEach((i) => (b[i.name] = i.value));
           try { await post('/produits', b); ok('Article ajouté.'); m.close(); load(); } catch (x) { err(x); }
         });
@@ -406,14 +451,15 @@ const Pages = {};
   // ================= APPROVISIONNEMENT =================
   Pages['/appro'] = {
     title: 'Approvisionnement', back: '/',
-    async render(el) {
+    async render(el, params) {
       let produits = await get('/produits');
       let lignes = []; // {rid, Lib, qte, prixFour}
       let sel = null;
       el.innerHTML = `<div class="page-title">Approvisionnement des boissons</div>
         <div class="card"><div class="toolbar" style="margin-bottom:10px">
           <button class="btn" id="a-act">${ic('refresh')} Actualiser</button><div class="spacer"></div>
-          <div class="field"><label>Date achat</label><input class="input" type="date" id="a-date" value="${today()}"></div></div>
+          <div class="field"><label>Date achat</label><input class="input" type="date" id="a-date" value="${params.date || today()}" max="${today()}"></div></div>
+          ${params.retour === 'vente' ? `<div class="notice info">${ic('info')}<div>Enregistrez l'approvisionnement du <b>${dfr(params.date)}</b>, puis vous pourrez revenir à la saisie de la vente.</div></div>` : ''}
           <div class="field" style="position:relative"><label style="color:var(--navy)">Sélectionner la boisson</label>
             <div class="search">${ic('search')}<input class="input" id="a-q" placeholder="Tapez le nom de la boisson…" autocomplete="off"></div>
             <div id="a-dd" class="hidden" style="position:absolute;left:0;right:0;top:100%;z-index:20;background:#fff;border:1px solid var(--line);border-radius:10px;box-shadow:var(--shadow);max-height:300px;overflow:auto"></div></div>
@@ -479,11 +525,14 @@ const Pages = {};
         const items = lignes.filter((l) => l.qte > 0);
         if (!items.length) return err('Ajoutez au moins une boisson avec une quantité.');
         const date = $('#a-date').value;
-        if (!(await confirm(`Valider l'approvisionnement du <b>${dfr(date)}</b> ?<br>${items.length} boisson(s) · Quantité ${qty(sum(items, 'qte'))} · Total <b>${money(sum(items, (l) => l.qte * l.prixFour))}</b>`, { okText: 'Valider' }))) return;
+        if (!(await confirm(`Valider l'approvisionnement du <b>${dfr(date)}</b> ?<br>${items.length} boisson(s) · Quantité ${qty(sum(items, 'qte'))} · Total <b>${money(sum(items, (l) => l.qte * l.prixFour))}</b>`))) return;
         try {
           const r = await post('/appros', { date, lignes: items.map((l) => ({ rid: l.rid, qte: l.qte })) });
-          ok(`Approvisionnement ${r.numero} enregistré.`);
+          ok(`Approvisionnement ${r.numero} enregistré avec succès.`);
           lignes = []; produits = await get('/produits'); draw();
+          await new Promise((res) => setTimeout(res, 900));
+          if (r.avertissement) await alert(esc(r.avertissement), 'Vente déjà saisie');
+          if (params.retour === 'vente' && (await confirm(`Retourner à la saisie de la vente du <b>${dfr(date)}</b> ?`, { title: 'Vente' }))) go('/ventes', { date });
         } catch (x) { err(x); }
       });
       draw();
@@ -516,6 +565,7 @@ const Pages = {};
     foot: `<button class="btn sec" data-list>${ic('list')} Liste des créanciers</button><button class="btn red" data-ok>${ic('check')} Enregistrer</button>` });
     m.$('[data-list]').addEventListener('click', () => { m.close(); go('/creances/creanciers'); });
     m.$('[data-ok]').addEventListener('click', async () => {
+      if (!(await UI.ask(`Enregistrer le créancier <b>${esc(m.$('[name=nom]').value)}</b> ?`))) return;
       try {
         const r = await post('/creanciers', { nom: m.$('[name=nom]').value, contact: m.$('[name=contact]').value });
         ok('Créancier enregistré.'); m.close(); onDone && onDone(r.nom);
@@ -525,25 +575,44 @@ const Pages = {};
 
   Pages['/creances/credit'] = {
     title: 'Enregistrement Crédits', back: '/creances',
-    async render(el) {
+    async render(el, params) {
       el.innerHTML = `<div class="card" style="max-width:560px;margin:0 auto">
         <div class="page-sub" style="margin:0 0 10px">ENREGISTREMENT CRÉDITS CLIENTS</div>
         <div class="row" style="justify-content:flex-end;margin-bottom:10px"><button class="btn" id="c-new">${ic('plus')} Nouveau créancier</button></div>
-        <div class="field"><label>Date crédit</label><input class="input" type="date" id="c-date" value="${today()}"></div>
+        <div class="field"><label>Date crédit</label><input class="input" type="date" id="c-date" value="${params.date || today()}" max="${today()}"></div>
+        <div id="c-etat"></div>
         <div class="field"><label>Nom créancier</label><select class="input" id="c-nom"></select></div>
         <div class="field"><label>Montant crédit</label><input class="input big" id="c-mt" placeholder="0"></div>
         <div class="field"><label>Motif</label><textarea class="input" id="c-motif"></textarea></div>
-        <div class="btn-bar"><button class="btn lg" id="c-val">${ic('check')} Valider</button></div></div>`;
+        <div class="btn-bar"><button class="btn lg" id="c-val">${ic('check')} Valider</button></div>
+        <div class="row" style="justify-content:flex-end;margin-top:12px"><button class="btn sec sm" id="c-caisse">${ic('power')} Fermeture de caisse de ce jour</button></div></div>`;
+      // État des créances du jour par rapport au crédit déclaré dans la vente
+      const etat = async () => {
+        const d = $('#c-date').value;
+        try {
+          const s = await get('/caisse?date=' + d);
+          if (!s.venteExiste) { $('#c-etat').innerHTML = `<div class="notice info">${ic('info')}<div>Pas encore de vente pour le ${dfr(d)}. Créances déjà saisies ce jour : <b>${money(s.creances)}</b> (elles seront reprises automatiquement dans la vente).</div></div>`; return; }
+          const reste = s.venteCredit - s.creances;
+          $('#c-etat').innerHTML = `<div class="notice ${reste === 0 ? 'ok' : ''}">${ic(reste === 0 ? 'check' : 'warn')}<div>Crédit déclaré dans la vente ${esc(s.numeroVente)} : <b>${money(s.venteCredit)}</b><br>
+            Créances enregistrées pour ce jour : <b>${money(s.creances)}</b><br>${reste === 0 ? '✓ Les créances correspondent au crédit de la vente.' : reste > 0 ? `Reste à enregistrer : <b>${money(reste)}</b>` : `Les créances dépassent le crédit de la vente de <b>${money(-reste)}</b> : modifiez la vente.`}</div></div>`;
+        } catch { $('#c-etat').innerHTML = ''; }
+      };
+      $('#c-date').addEventListener('change', etat);
       const fill = async (s) => { $('#c-nom').innerHTML = (await creancierOptions(s)).html; };
       await fill();
       const mt = moneyInput($('#c-mt'));
       $('#c-new').addEventListener('click', () => nouveauCreancier(fill));
+      $('#c-caisse').addEventListener('click', () => go('/caisse', { date: $('#c-date').value }));
       $('#c-val').addEventListener('click', async () => {
+        if (!$('#c-nom').value) return err('Sélectionnez le créancier.');
+        if (!(await UI.ask(`Enregistrer un crédit de <b>${money(mt.get())}</b> pour <b>${esc($('#c-nom').value)}</b> à la date du <b>${dfr($('#c-date').value)}</b> ?`))) return;
         try {
           await post('/credits', { date: $('#c-date').value, nom: $('#c-nom').value, montant: mt.get(), motif: $('#c-motif').value });
-          ok('Crédit enregistré.'); $('#c-mt').value = ''; $('#c-motif').value = ''; $('#c-nom').value = '';
+          ok('Crédit enregistré avec succès.'); $('#c-mt').value = ''; $('#c-motif').value = ''; $('#c-nom').value = '';
+          etat();
         } catch (x) { err(x); }
       });
+      etat();
     },
   };
 
@@ -588,10 +657,10 @@ const Pages = {};
       $('#p-val').addEventListener('click', async () => {
         const nom = $('#p-nom').value;
         if (!nom) return err('Sélectionnez le créancier.');
-        if (!(await confirm(`Enregistrer un paiement de <b>${money(mt.get())}</b> pour <b>${esc(nom)}</b> ?`, { okText: 'Payer' }))) return;
+        if (!(await confirm(`Enregistrer un paiement de <b>${money(mt.get())}</b> pour <b>${esc(nom)}</b> ?`))) return;
         try {
           const r = await post('/paiements', { date: $('#p-date').value, nom, montant: mt.get() });
-          ok('Paiement enregistré. Nouveau solde : ' + money(r.solde)); $('#p-mt').value = ''; await fill(nom);
+          ok('Paiement enregistré avec succès. Nouveau solde : ' + money(r.solde)); $('#p-mt').value = ''; await fill(nom);
         } catch (x) { err(x); }
       });
     },
@@ -621,7 +690,7 @@ const Pages = {};
       const d = $('#t-del');
       if (d) d.addEventListener('click', async () => {
         const c = t.selected; if (!c) return;
-        if (!(await confirm(`Supprimer le compte de <b>${esc(c.nom)}</b> (solde ${money(c.solde)}) ?<br><span class="muted">L'historique des crédits et paiements est conservé.</span>`, { danger: true, okText: 'Supprimer' }))) return;
+        if (!(await confirm(`Supprimer le compte de <b>${esc(c.nom)}</b> (solde ${money(c.solde)}) ?<br><span class="muted">L'historique des crédits et paiements est conservé.</span>`, { danger: true, okText: 'Oui' }))) return;
         try { await del('/creanciers?nom=' + encodeURIComponent(c.nom)); ok('Créancier supprimé.'); load(); } catch (x) { err(x); }
       });
       await load();
@@ -647,11 +716,11 @@ const Pages = {};
           d.paiements, { foot: ['Total', money(sum(d.paiements, 'payer'))] });
         $('#d-pay').addEventListener('click', () => go('/creances/paiement', { nom: d.nom }));
         $$('[data-cr]').forEach((b) => b.addEventListener('click', async () => {
-          if (!(await confirm('Supprimer ce crédit ? Le solde du créancier sera diminué.', { danger: true, okText: 'Supprimer' }))) return;
+          if (!(await confirm('Supprimer ce crédit ? Le solde du créancier sera diminué.', { danger: true, okText: 'Oui' }))) return;
           try { await del('/credits/' + b.dataset.cr); ok('Crédit supprimé.'); load(); } catch (x) { err(x); }
         }));
         $$('[data-pa]').forEach((b) => b.addEventListener('click', async () => {
-          if (!(await confirm('Supprimer ce paiement ? Le solde du créancier sera augmenté.', { danger: true, okText: 'Supprimer' }))) return;
+          if (!(await confirm('Supprimer ce paiement ? Le solde du créancier sera augmenté.', { danger: true, okText: 'Oui' }))) return;
           try { await del('/paiements/' + b.dataset.pa); ok('Paiement supprimé.'); load(); } catch (x) { err(x); }
         }));
       };
@@ -684,7 +753,7 @@ const Pages = {};
       const d = $('#h-del');
       if (d) d.addEventListener('click', async () => {
         const r = t.selected; if (!r) return;
-        if (!(await confirm(`Supprimer le paiement de <b>${money(r.payer)}</b> de <b>${esc(r.client)}</b> du ${dfr(r.datepaiement)} ?`, { danger: true, okText: 'Supprimer' }))) return;
+        if (!(await confirm(`Supprimer le paiement de <b>${money(r.payer)}</b> de <b>${esc(r.client)}</b> du ${dfr(r.datepaiement)} ?`, { danger: true, okText: 'Oui' }))) return;
         try { await del('/paiements/' + r.id); ok('Paiement supprimé.'); load(); } catch (x) { err(x); }
       });
       await load();
@@ -694,11 +763,11 @@ const Pages = {};
   // ================= DÉPENSES =================
   Pages['/depenses'] = {
     title: 'Enregistrement dépenses', back: '/',
-    async render(el) {
+    async render(el, params) {
       el.innerHTML = `<div class="card" style="max-width:560px;margin:0 auto">
         <div class="page-sub" style="font-style:normal;margin:0 0 10px">ENREGISTREMENT DES DÉPENSES</div>
         <div class="row" style="justify-content:flex-end;margin-bottom:10px"><button class="btn" id="d-new">${ic('plus')} Nouvelle Dépense</button></div>
-        <div class="field"><label>Date dépense</label><input class="input" type="date" id="d-date" value="${today()}"></div>
+        <div class="field"><label>Date dépense</label><input class="input" type="date" id="d-date" value="${params.date || today()}" max="${today()}"></div>
         <div class="field"><label>Dépenses</label><select class="input" id="d-type"></select></div>
         <div class="field"><label>Montant</label><input class="input big" id="d-mt" placeholder="0"></div>
         <div class="field"><label>Motif</label><textarea class="input" id="d-motif"></textarea></div>
@@ -714,14 +783,17 @@ const Pages = {};
         const m = modal({ title: 'Nouvelle dépense', body: `<div class="field"><label>Nom de la dépense</label><input class="input" name="nom" placeholder="ex : TRANSPORT, GLACE, ÉLECTRICITÉ…"></div>`,
           foot: `<button class="btn sec" data-close>Annuler</button><button class="btn" data-ok>${ic('check')} Enregistrer</button>` });
         m.$('[data-ok]').addEventListener('click', async () => {
+          if (!(await UI.ask(`Ajouter la dépense <b>${esc(m.$('[name=nom]').value)}</b> ?`))) return;
           try { const r = await post('/depenses/types', { nom: m.$('[name=nom]').value }); ok('Dépense ajoutée.'); m.close(); fill(r.nom); } catch (x) { err(x); }
         });
       });
       $('#d-hist').addEventListener('click', () => go('/depenses/historique'));
       $('#d-val').addEventListener('click', async () => {
+        if (!$('#d-type').value) return err('Sélectionnez la dépense.');
+        if (!(await UI.ask(`Enregistrer la dépense <b>${esc($('#d-type').value)}</b> de <b>${money(mt.get())}</b> à la date du <b>${dfr($('#d-date').value)}</b> ?`))) return;
         try {
           await post('/depenses', { date: $('#d-date').value, depense: $('#d-type').value, montant: mt.get(), motif: $('#d-motif').value });
-          ok('Dépense enregistrée.'); $('#d-mt').value = ''; $('#d-motif').value = '';
+          ok('Dépense enregistrée avec succès.'); $('#d-mt').value = ''; $('#d-motif').value = '';
         } catch (x) { err(x); }
       });
     },
@@ -751,7 +823,7 @@ const Pages = {};
       const d = $('#h-del');
       if (d) d.addEventListener('click', async () => {
         const r = t.selected; if (!r) return;
-        if (!(await confirm(`Supprimer la dépense <b>${esc(r.DEPENSE)}</b> de ${money(r.MONTANT)} du ${dfr(r.DATEDEP)} ?`, { danger: true, okText: 'Supprimer' }))) return;
+        if (!(await confirm(`Supprimer la dépense <b>${esc(r.DEPENSE)}</b> de ${money(r.MONTANT)} du ${dfr(r.DATEDEP)} ?`, { danger: true, okText: 'Oui' }))) return;
         try { await del('/depenses/' + r.id); ok('Dépense supprimée.'); load(); } catch (x) { err(x); }
       });
       await load();
@@ -761,20 +833,40 @@ const Pages = {};
   // ================= FERMETURE DE CAISSE =================
   Pages['/caisse'] = {
     title: 'Fermeture de caisse', back: '/',
-    async render(el) {
-      el.innerHTML = `<div class="card" style="max-width:620px;margin:0 auto">
-        <div class="date-label" id="k-dl"></div>
-        <div class="toolbar" style="justify-content:flex-end;margin-top:6px"><div class="field"><label>Date de session</label><input class="input" type="date" id="k-date" value="${today()}"></div></div>
+    async render(el, params) {
+      el.innerHTML = `<div class="card" style="max-width:660px;margin:0 auto">
+        <div class="date-label" id="k-dl" style="text-transform:none"></div>
+        <div class="toolbar" style="justify-content:flex-end;margin-top:6px"><div class="field"><label>Date de session</label><input class="input" type="date" id="k-date" value="${params.date || today()}" max="${today()}"></div></div>
         <div id="k-body"></div></div>`;
+      let premier = !params.date;
+      const etape = (okk, titre, detail, lien, bouton) => `<div class="step ${okk === true ? 'ok' : okk === false ? 'ko' : 'opt'}">
+        <span class="st-ic">${okk === true ? '✓' : okk === false ? '!' : '•'}</span><div><b>${titre}</b><small>${detail}</small></div>
+        ${lien ? `<a class="btn sec sm" href="#${lien}">${bouton}</a>` : ''}</div>`;
       const load = async () => {
         const date = $('#k-date').value;
-        $('#k-dl').textContent = dlong(date);
+        $('#k-dl').textContent = 'Session du ' + dlong(date);
         const s = await get('/caisse?date=' + date);
+        if (premier && s.aFermer && s.aFermer.DateVente !== date && !s.existe) {
+          premier = false;
+          $('#k-date').value = s.aFermer.DateVente;
+          toast(`Caisse à fermer : vente ${s.aFermer.NumVentes} du ${dfr(s.aFermer.DateVente)}.`);
+          return load();
+        }
+        premier = false;
         const f = s.existe;
         const line = (lbl, v, color, cls = '') => `<div class="kv"><span style="font-weight:700;font-size:12.5px;color:${color}">${lbl}</span><span class="val ${cls}" style="background:#fff;border:1px solid var(--line);color:${color}">${money(v)}</span></div>`;
+        const q = `date=${date}`;
+        const creditOk = s.venteCredit === s.creances;
+        const pretes = s.venteExiste && creditOk;
         $('#k-body').innerHTML = `
-          ${f ? `<div class="notice ok">${ic('lock')}<div>Caisse fermée le ${dfr(f.DATEENREG)} à ${hm(f.HEUREVERSE)} par ${esc(f.AGENTS || '')}.</div></div>` : ''}
-          ${!s.venteExiste && !f ? `<div class="notice">${ic('warn')}<div>Aucune vente enregistrée pour cette date.</div></div>` : ''}
+          ${f ? `<div class="notice ok">${ic('lock')}<div>Caisse fermée le ${dfr(f.DATEENREG)} à ${hm(f.HEUREVERSE)} par ${esc(f.AGENTS || '')}.</div></div>` : `
+          <div class="card-title" style="margin-top:4px">${ic('list')} Avant de fermer la caisse, enregistrez :</div>
+          <div class="steps">
+            ${etape(null, "1. L'approvisionnement (s'il y en a eu)", s.appro.n ? `${s.appro.n} approvisionnement(s) ce jour · ${money(s.appro.total)}` : 'Aucun approvisionnement ce jour', `/appro?${q}`, 'Appro')}
+            ${etape(s.venteExiste, '2. La vente de la journée', s.venteExiste ? `Vente ${esc(s.numeroVente)} · ${money(s.totalVente)}` : 'Obligatoire : aucune vente enregistrée pour ce jour', `/ventes?${q}`, s.venteExiste ? 'Voir / modifier' : 'Saisir')}
+            ${etape(null, "3. Les dépenses (s'il y en a)", s.nbDepenses ? `${s.nbDepenses} dépense(s) · ${money(s.depenses)}` : 'Aucune dépense ce jour', `/depenses?${q}`, 'Dépenses')}
+            ${etape(s.venteExiste ? creditOk : null, "4. Les créances (s'il y en a)", `Crédit de la vente : ${money(s.venteCredit)} · Créances saisies : ${money(s.creances)}${!creditOk ? (s.venteCredit > s.creances ? ` · <b>reste ${money(s.venteCredit - s.creances)} à saisir</b>` : ' · <b>créances supérieures au crédit de la vente</b>') : ''}`, `/creances/credit?${q}`, 'Créances')}
+          </div>`}
           ${line("CAISSE D'HIER", f ? f.FONDSDECAISSEHIER : s.caisseHier, '#999')}
           ${line('TOTAL VENTE', f ? f.MTJRCTN : s.totalVente, '#7b1fe0')}
           ${line('TOTAL CRÉDITS PAYÉS JOUR', f ? f.CREDITSPAYES : s.creditsPayes, '#7b1fe0')}
@@ -782,28 +874,31 @@ const Pages = {};
           ${line('TOTAL DÉPENSES', f ? f.MTDEPENSES : s.depenses, '#0f8a8a')}
           ${line('CAISSE [(Vente + Crédit payé) − (Créance + Dépense)]', f ? f.SOMMES : s.sommes, 'var(--navy)')}
           <div class="kv"><span style="font-weight:700;font-size:12.5px;color:var(--red)">CAISSE DU JOUR À LA FERMETURE</span>
-            ${f ? `<span class="val red">${money(f.MTVERSER)}</span>` : `<input class="input big" id="k-verse" style="max-width:190px;color:var(--red)" placeholder="0">`}</div>
+            ${f ? `<span class="val red">${money(f.MTVERSER)}</span>` : `<input class="input big" id="k-verse" style="max-width:190px;color:var(--red)" placeholder="0" ${pretes ? '' : 'disabled'}>`}</div>
           <div class="kv"><span style="font-weight:700;font-size:12.5px">ÉCART</span><b id="k-ecart">${money(f ? f.ECART : s.sommes)}</b></div>
+          ${!f && !pretes ? `<div class="notice err" style="margin-top:12px">${ic('warn')}<div>${!s.venteExiste ? "La vente de cette journée doit être enregistrée avant la fermeture." : "Le total des créances enregistrées individuellement doit être égal au total crédit de la vente avant la fermeture."}</div></div>` : ''}
           <div class="btn-bar">${f ? (adminOnly() ? `<button class="btn red" id="k-reo">${ic('refresh')} Rouvrir la caisse</button>` : '')
-            : `<button class="btn sec" id="k-act" style="background:#2196f3;color:#fff;border:0">${ic('refresh')} Actualiser</button><button class="btn lg" id="k-val">${ic('check')} Valider</button>`}</div>`;
+            : `<button class="btn sec" id="k-act" style="background:#2196f3;color:#fff;border:0">${ic('refresh')} Actualiser</button><button class="btn lg" id="k-val" ${pretes ? '' : 'disabled'}>${ic('check')} Valider</button>`}</div>`;
         if (!f) {
           const v = moneyInput($('#k-verse'), (x) => { $('#k-ecart').textContent = money(s.sommes - x); });
           $('#k-act').addEventListener('click', () => load().catch(err));
           $('#k-val').addEventListener('click', async () => {
             if ($('#k-verse').value === '') return err('Saisissez la caisse du jour à la fermeture.');
-            if (!(await confirm(`Fermer la caisse du <b>${dfr(date)}</b> ?<br>Caisse calculée : <b>${money(s.sommes)}</b><br>Caisse à la fermeture : <b>${money(v.get())}</b><br>Écart : <b>${money(s.sommes - v.get())}</b>`, { okText: 'Fermer la caisse' }))) return;
-            try { await post('/caisse', { date, montantVerse: v.get() }); ok('Caisse fermée.'); load(); } catch (x) { err(x); }
+            if (!(await confirm(`Voulez-vous fermer la caisse du <b>${dfr(date)}</b> ?<br><br>Caisse calculée : <b>${money(s.sommes)}</b><br>Caisse à la fermeture : <b>${money(v.get())}</b><br>Écart : <b>${money(s.sommes - v.get())}</b><br><span class="muted">Après la fermeture, la vente, les dépenses et les créances de ce jour ne pourront plus être modifiées.</span>`))) return;
+            try { await post('/caisse', { date, montantVerse: v.get() }); ok('Caisse fermée avec succès.'); load(); } catch (x) { err(x); }
           });
         } else if ($('#k-reo')) {
           $('#k-reo').addEventListener('click', async () => {
-            if (!(await confirm('Rouvrir la caisse de cette date ? La fermeture sera supprimée.', { danger: true, okText: 'Rouvrir' }))) return;
-            try { await del('/caisse/' + f.rid); ok('Caisse rouverte.'); load(); } catch (x) { err(x); }
+            if (!(await confirm('Voulez-vous rouvrir la caisse de cette date ? La fermeture sera supprimée.', { danger: true }))) return;
+            try { await del('/caisse/' + f.rid); ok('Caisse rouverte avec succès.'); load(); } catch (x) { err(x); }
           });
         }
       };
       $('#k-date').addEventListener('change', () => load().catch(err));
       await load();
-      alert(`${ic('info', 'style="width:18px;height:18px;vertical-align:-3px"')} Merci d'enregistrer toutes les rubriques si possible telles que : <b>Ventes, Dépenses et Crédits</b> avant de fermer la session !`, 'Fermeture de caisse');
+      if (!$('.notice.ok', el)) {
+        alert(`Avant de fermer la caisse, merci d'enregistrer :<br><br>• l'<b>approvisionnement</b> de la journée (s'il y en a eu)<br>• la <b>vente</b> de la journée<br>• les <b>dépenses</b> (s'il y en a)<br>• les <b>créances</b> (s'il y en a) — leur total doit être égal au crédit de la vente`, 'Fermeture de caisse');
+      }
     },
   };
 
@@ -872,7 +967,7 @@ const Pages = {};
       ], d.lignes, { green: 1, foot: ['Total', '', '', '', '', '', '', '', qty(sum(d.lignes, 'StockVendu')), '', money(sum(d.lignes, 'TotalPV')), money(sum(d.lignes, 'TotalAchat')), money(sum(d.lignes, 'Benefice'))] });
       const b = $('#dv-del');
       if (b) b.addEventListener('click', async () => {
-        if (!(await confirm(`Supprimer la vente <b>${esc(params.numero)}</b> ?<br>Les quantités vendues seront remises en stock.`, { danger: true, okText: 'Supprimer' }))) return;
+        if (!(await confirm(`Supprimer la vente <b>${esc(params.numero)}</b> ?<br>Les quantités vendues seront remises en stock.`, { danger: true, okText: 'Oui' }))) return;
         try { await del('/ventes?numero=' + encodeURIComponent(params.numero)); ok('Vente supprimée.'); go('/bilans/ventes'); } catch (x) { err(x); }
       });
     },
@@ -921,7 +1016,7 @@ const Pages = {};
       ], rows, { green: 1, empty: 'Aucune ligne.' });
       const b = $('#da-del');
       if (b) b.addEventListener('click', async () => {
-        if (!(await confirm(`Supprimer l'approvisionnement <b>${esc(params.numero)}</b> ?<br>Les quantités seront retirées du stock.`, { danger: true, okText: 'Supprimer' }))) return;
+        if (!(await confirm(`Supprimer l'approvisionnement <b>${esc(params.numero)}</b> ?<br>Les quantités seront retirées du stock.`, { danger: true, okText: 'Oui' }))) return;
         try { await del(`/appros?numero=${encodeURIComponent(params.numero)}&date=${params.date}`); ok('Approvisionnement supprimé.'); go('/bilans/appros'); } catch (x) { err(x); }
       });
     },

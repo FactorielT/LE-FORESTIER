@@ -1,6 +1,6 @@
 const router = require('express').Router();
 const { q, tx } = require('../db');
-const { admin, h, fail, num, today, moisDe, anneeDe, isDate, nextNumero } = require('../util');
+const { admin, h, fail, num, today, moisDe, anneeDe, isDate, nextNumero, verifierJourOuvert } = require('../util');
 
 async function compte(c, nom) {
   const r = await c.query(`SELECT * FROM "CompteCreances" WHERE UPPER(TRIM("Nomprenom"))=UPPER(TRIM($1)) ORDER BY "IDCompteCreances" LIMIT 1 FOR UPDATE`, [nom]);
@@ -80,6 +80,7 @@ router.post('/credits', h(async (req, res) => {
   const m = Math.round(num(montant));
   if (m <= 0) throw fail('Le montant du crédit doit être supérieur à 0.');
   await tx(async (c) => {
+    await verifierJourOuvert(c, date, 'un crédit');
     const cpt = await compte(c, nom);
     await c.query(
       `INSERT INTO "creancier"(nomcreancier,montantcreance,motifcreance,datecreance,mois,annee,valeurscredits,totalverser,reste,"DATEENREG")
@@ -102,6 +103,7 @@ router.delete('/credits/:id', admin, h(async (req, res) => {
   await tx(async (c) => {
     const cr = (await c.query(`DELETE FROM "creancier" WHERE "IDcreancier"=$1 RETURNING *`, [Number(req.params.id)])).rows[0];
     if (!cr) throw fail('Crédit introuvable.', 404);
+    if (cr.datecreance && req.user.role !== 'superadmin') await verifierJourOuvert(c, cr.datecreance, 'ou supprimer un crédit');
     const cpt = await compte(c, cr.nomcreancier);
     await c.query(`UPDATE "CompteCreances" SET "MontantCredit"=COALESCE("MontantCredit",0)-$1 WHERE "IDCompteCreances"=$2`, [Number(cr.montantcreance) || 0, cpt.IDCompteCreances]);
   });
@@ -116,6 +118,7 @@ router.post('/paiements', h(async (req, res) => {
   const m = Math.round(num(montant));
   if (m <= 0) throw fail('Le montant versé doit être supérieur à 0.');
   const out = await tx(async (c) => {
+    await verifierJourOuvert(c, date, 'un paiement de crédit');
     const cpt = await compte(c, nom);
     const solde = Number(cpt.MontantCredit) || 0;
     if (m > solde) throw fail(`Le montant versé (${m.toLocaleString('fr-FR')}) dépasse le total des crédits (${solde.toLocaleString('fr-FR')}).`);
@@ -138,6 +141,7 @@ router.delete('/paiements/:id', admin, h(async (req, res) => {
   await tx(async (c) => {
     const p = (await c.query(`DELETE FROM "paiement" WHERE "IDpaiement"=$1 RETURNING *`, [Number(req.params.id)])).rows[0];
     if (!p) throw fail('Paiement introuvable.', 404);
+    if (p.datepaiement && req.user.role !== 'superadmin') await verifierJourOuvert(c, p.datepaiement, 'ou supprimer un paiement');
     const cpt = await compte(c, p.client);
     await c.query(`UPDATE "CompteCreances" SET "MontantCredit"=COALESCE("MontantCredit",0)+$1 WHERE "IDCompteCreances"=$2`, [Number(p.payer) || 0, cpt.IDCompteCreances]);
   });
