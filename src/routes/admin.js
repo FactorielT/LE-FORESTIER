@@ -52,9 +52,29 @@ router.put('/parametres', h(async (req, res) => {
   res.json({ ok: true });
 }));
 
-// Utilisateurs
+// Utilisateurs : chaque application a ses propres comptes (MAQUIS, RESTO). TOUS = les deux (super administrateur).
+const APPS = ['MAQUIS', 'RESTO', 'TOUS'];
+const appSession = (req) => ((req.user.app || 'maquis') === 'resto' ? 'RESTO' : 'MAQUIS');
+const voitTout = (req) => req.user.acces === 'TOUS';
+function appCible(req, demande) {
+  if (voitTout(req) && APPS.includes(demande)) return demande;
+  return appSession(req);
+}
+async function verifierLoginLibre(login, app, saufId = 0) {
+  const ex = await q(`SELECT "Application" FROM "T_Utilisateur" WHERE LOWER(TRIM("Login"))=LOWER(TRIM($1)) AND "IDT_Utilisateur"<>$2
+    AND (COALESCE("Application",'MAQUIS')=$3 OR "Application"='TOUS' OR $3='TOUS')`, [login, saufId, app]);
+  if (ex.rowCount) throw fail(`Le login « ${login} » est déjà utilisé pour cette application.`);
+}
+async function utilisateurAccessible(req, id) {
+  const cur = (await q(`SELECT * FROM "T_Utilisateur" WHERE "IDT_Utilisateur"=$1`, [id])).rows[0];
+  if (!cur) throw fail('Utilisateur introuvable.', 404);
+  if (!voitTout(req) && (cur.Application || 'MAQUIS') !== appSession(req)) throw fail("Cet utilisateur appartient à l'autre application.", 403);
+  if (roleOf(cur.NomGroupe) === 'superadmin' && req.user.role !== 'superadmin') throw fail('Modification non autorisée.', 403);
+  return cur;
+}
 router.get('/utilisateurs', h(async (req, res) => {
-  const r = await q(`SELECT "IDT_Utilisateur" id, "Nom", "Prenom", "Login", "NomGroupe" FROM "T_Utilisateur" ORDER BY "Nom", "Prenom"`);
+  const r = await q(`SELECT "IDT_Utilisateur" id, "Nom", "Prenom", "Login", "NomGroupe", COALESCE("Application",'MAQUIS') "Application" FROM "T_Utilisateur"
+    WHERE $1 OR COALESCE("Application",'MAQUIS')=$2 ORDER BY "Application", "Nom", "Prenom"`, [voitTout(req), appSession(req)]);
   res.json(r.rows);
 }));
 function checkGroupe(req, groupe) {
@@ -64,29 +84,29 @@ router.post('/utilisateurs', h(async (req, res) => {
   const b = req.body || {};
   if (!b.Login || !b.mdp) throw fail('Login et mot de passe obligatoires.');
   checkGroupe(req, b.NomGroupe);
-  const ex = await q(`SELECT 1 FROM "T_Utilisateur" WHERE LOWER(TRIM("Login"))=LOWER(TRIM($1))`, [b.Login]);
-  if (ex.rowCount) throw fail('Ce login existe déjà.');
-  await q(`INSERT INTO "T_Utilisateur"("Nom","Prenom","Login","mdp","NomGroupe") VALUES ($1,$2,$3,$4,$5)`,
-    [b.Nom || '', b.Prenom || '', String(b.Login).trim(), bcrypt.hashSync(String(b.mdp), 10), b.NomGroupe || 'CAISSIER']);
+  const app = appCible(req, b.Application);
+  await verifierLoginLibre(String(b.Login).trim(), app);
+  await q(`INSERT INTO "T_Utilisateur"("Nom","Prenom","Login","mdp","NomGroupe","Application") VALUES ($1,$2,$3,$4,$5,$6)`,
+    [b.Nom || '', b.Prenom || '', String(b.Login).trim(), bcrypt.hashSync(String(b.mdp), 10), b.NomGroupe || 'CAISSIER', app]);
   res.json({ ok: true });
 }));
 router.put('/utilisateurs/:id', h(async (req, res) => {
   const b = req.body || {};
   const id = Number(req.params.id);
-  const cur = (await q(`SELECT * FROM "T_Utilisateur" WHERE "IDT_Utilisateur"=$1`, [id])).rows[0];
-  if (!cur) throw fail('Utilisateur introuvable.', 404);
-  if (roleOf(cur.NomGroupe) === 'superadmin' && req.user.role !== 'superadmin') throw fail('Modification non autorisée.', 403);
+  const cur = await utilisateurAccessible(req, id);
   checkGroupe(req, b.NomGroupe);
-  await q(`UPDATE "T_Utilisateur" SET "Nom"=$1,"Prenom"=$2,"Login"=$3,"NomGroupe"=$4 WHERE "IDT_Utilisateur"=$5`,
-    [b.Nom || '', b.Prenom || '', String(b.Login || cur.Login).trim(), b.NomGroupe || cur.NomGroupe, id]);
+  const app = voitTout(req) && APPS.includes(b.Application) ? b.Application : cur.Application || 'MAQUIS';
+  const login = String(b.Login || cur.Login).trim();
+  await verifierLoginLibre(login, app, id);
+  await q(`UPDATE "T_Utilisateur" SET "Nom"=$1,"Prenom"=$2,"Login"=$3,"NomGroupe"=$4,"Application"=$5 WHERE "IDT_Utilisateur"=$6`,
+    [b.Nom || '', b.Prenom || '', login, b.NomGroupe || cur.NomGroupe, app, id]);
   if (b.mdp) await q(`UPDATE "T_Utilisateur" SET mdp=$1 WHERE "IDT_Utilisateur"=$2`, [bcrypt.hashSync(String(b.mdp), 10), id]);
   res.json({ ok: true });
 }));
 router.delete('/utilisateurs/:id', h(async (req, res) => {
   const id = Number(req.params.id);
   if (id === req.user.id) throw fail('Vous ne pouvez pas supprimer votre propre compte.');
-  const cur = (await q(`SELECT "NomGroupe" FROM "T_Utilisateur" WHERE "IDT_Utilisateur"=$1`, [id])).rows[0];
-  if (cur && roleOf(cur.NomGroupe) === 'superadmin' && req.user.role !== 'superadmin') throw fail('Suppression non autorisée.', 403);
+  await utilisateurAccessible(req, id);
   await q(`DELETE FROM "T_Utilisateur" WHERE "IDT_Utilisateur"=$1`, [id]);
   res.json({ ok: true });
 }));

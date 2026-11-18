@@ -221,8 +221,8 @@ const MODELE = [
   { table: 'DEPENSEQUOTIDIEN', titre: 'Dépenses quotidiennes', desc: 'Une ligne par dépense.', cols: ['DEPENSE', 'MONTANT', 'DETAILS', 'AGENTS', 'DATEDEP'],
     ex: [['TRANSPORT', 1500, 'Livraison casiers', 'ADMIN', '14/09/2026']] },
   { table: 'VERSEMENTINTERNE', titre: 'Fermetures de caisse', desc: 'Une ligne par journée fermée.',
-    cols: ['DATEVERSE', 'MTJRCTN', 'MTDEPENSES', 'CREANCES', 'CREDITSPAYES', 'FONDSDECAISSEHIER', 'SOMMES', 'MTVERSER', 'ECART', 'HEUREVERSE', 'AGENTS'],
-    ex: [['14/09/2026', 163600, 3650, 2500, 0, 0, 157450, 157450, 0, '22:44', 'ADMIN']] },
+    cols: ['DATEVERSE', 'MTJRCTN', 'MTDEPENSES', 'CREANCES', 'CREDITSPAYES', 'FONDSDECAISSEHIER', 'SOMMES', 'MTVERSER', 'WAVE', 'OM', 'ESPECE', 'ECART', 'HEUREVERSE', 'AGENTS'],
+    ex: [['14/09/2026', 163600, 3650, 2500, 0, 0, 157450, 157450, 10000, 5000, 142450, 0, '22:44', 'ADMIN']] },
   { table: 'T_Utilisateur', titre: 'Utilisateurs', desc: 'Le mot de passe (mdp) sera chiffré à la première connexion. NomGroupe : SUPERADMIN, ADMINISTRATEUR ou CAISSIER.',
     cols: ['Nom', 'Prenom', 'Login', 'mdp', 'NomGroupe'], ex: [['KONE', 'AWA', 'awa', '1234', 'CAISSIER']] },
 ];

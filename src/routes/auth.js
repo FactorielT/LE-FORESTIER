@@ -5,13 +5,15 @@ const { q } = require('../db');
 const { SECRET, roleOf, auth, h, fail, getParam } = require('../util');
 
 router.get('/info', h(async (req, res) => {
-  res.json({ nom: (await getParam('nom_etablissement')) || 'LE REPOS DU FORESTIER' });
+  res.json({ nom: (await getParam('nom_etablissement')) || 'LE REPOS DU FORESTIER', resto: (await getParam('resto_nom')) || 'RESTO DU FORESTIER' });
 }));
 
 router.post('/login', h(async (req, res) => {
   const { login, mdp } = req.body || {};
+  const app = (req.body || {}).app === 'resto' ? 'resto' : 'maquis';
   if (!login || !mdp) throw fail('Veuillez saisir le login et le mot de passe.');
-  const r = await q(`SELECT * FROM "T_Utilisateur" WHERE LOWER(TRIM("Login"))=LOWER(TRIM($1))`, [login]);
+  // Chaque application a ses propres identifiants (le super administrateur a accès aux deux)
+  const r = await q(`SELECT * FROM "T_Utilisateur" WHERE LOWER(TRIM("Login"))=LOWER(TRIM($1)) AND (COALESCE("Application",'MAQUIS')=$2 OR "Application"='TOUS')`, [login, app.toUpperCase()]);
   let user = null;
   for (const u of r.rows) {
     const stored = u.mdp || '';
@@ -24,7 +26,7 @@ router.post('/login', h(async (req, res) => {
     }
     if (user) break;
   }
-  if (!user) throw fail('Login ou mot de passe incorrect.', 401);
+  if (!user) throw fail(`Login ou mot de passe incorrect pour l'application ${app === 'resto' ? 'RESTO DU FORESTIER' : 'LE REPOS DU FORESTIER'}.`, 401);
   const bloc = await q(`SELECT * FROM "blocage" WHERE bloc=true LIMIT 1`);
   const role = roleOf(user.NomGroupe);
   if (bloc.rowCount && role !== 'superadmin') throw fail("L'application est bloquée. Contactez l'administrateur.", 403);
@@ -34,6 +36,8 @@ router.post('/login', h(async (req, res) => {
     nom: [user.Prenom, user.Nom].filter(Boolean).join(' ') || user.Login,
     groupe: user.NomGroupe,
     role,
+    app,
+    acces: user.Application || 'MAQUIS',
   };
   const token = jwt.sign(payload, SECRET, { expiresIn: '7d' });
   res.cookie('token', token, { httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: 7 * 24 * 3600 * 1000 });
@@ -46,6 +50,16 @@ router.post('/logout', (req, res) => {
 });
 
 router.get('/me', auth, (req, res) => res.json(req.user));
+
+// Super administrateur (accès aux deux applications) : changer d'application sans se reconnecter
+router.post('/changer-app', auth, h(async (req, res) => {
+  const app = (req.body || {}).app === 'resto' ? 'resto' : 'maquis';
+  if (req.user.acces !== 'TOUS') throw fail("Votre compte n'a accès qu'à une seule application. Déconnectez-vous et connectez-vous avec les identifiants de l'autre application.", 403);
+  const { iat, exp, ...p } = req.user;
+  const payload = { ...p, app };
+  res.cookie('token', jwt.sign(payload, SECRET, { expiresIn: '7d' }), { httpOnly: true, sameSite: 'lax', secure: req.secure, maxAge: 7 * 24 * 3600 * 1000 });
+  res.json(payload);
+}));
 
 router.post('/me/password', auth, h(async (req, res) => {
   const { ancien, nouveau } = req.body || {};

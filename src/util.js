@@ -48,6 +48,14 @@ function superadmin(req, res, next) {
   next();
 }
 
+// Chaque session est ouverte sur une application : 'maquis' ou 'resto'
+function appSeule(app) {
+  return (req, res, next) => {
+    if (req.user && ((req.user.app || 'maquis') === app || req.user.acces === 'TOUS')) return next();
+    res.status(403).json({ error: app === 'resto' ? "Cette fonction appartient à l'application RESTO DU FORESTIER." : "Cette fonction appartient à l'application LE REPOS DU FORESTIER." });
+  };
+}
+
 // Gestion des numéros automatiques (table "numero" + format paramétrable)
 async function getParam(cle, client) {
   const r = await (client || { query: q }).query(`SELECT valeur FROM "parametres" WHERE cle=$1`, [cle]);
@@ -59,6 +67,7 @@ function formatNumero(fmt, n, dateIso, lib = '') {
     .replace('{AAAA}', anneeDe(dateIso))
     .replace('{AA}', anneeDe(dateIso).slice(2))
     .replace('{N6}', pad(n, 6))
+    .replace('{N5}', pad(n, 5))
     .replace('{N4}', pad(n, 4))
     .replace('{N3}', pad(n, 3))
     .replace('{N}', String(n))
@@ -113,5 +122,5 @@ function fail(message, status = 400) {
 
 module.exports = {
   SECRET, today, nowTime, moisDe, anneeDe, isDate, num, roleOf, auth, admin, superadmin, isAdmin,
-  getParam, formatNumero, nextNumero, h, fail, estFermee, verifierJourOuvert,
+  getParam, formatNumero, nextNumero, h, fail, estFermee, verifierJourOuvert, appSeule,
 };

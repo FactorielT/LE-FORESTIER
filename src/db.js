@@ -51,6 +51,8 @@ async function init() {
 
   const migrations = [
     `ALTER TABLE "T_Utilisateur" ALTER COLUMN "mdp" TYPE VARCHAR(100)`,
+    `ALTER TABLE "T_Utilisateur" ADD COLUMN IF NOT EXISTS "Application" VARCHAR(10) DEFAULT 'MAQUIS'`,
+    `UPDATE "T_Utilisateur" SET "Application"='MAQUIS' WHERE "Application" IS NULL`,
     `ALTER TABLE "T_Ventes" ADD COLUMN IF NOT EXISTS "CREDIT" BIGINT DEFAULT 0`,
     `ALTER TABLE "T_Ventes" ADD COLUMN IF NOT EXISTS "AGENT" VARCHAR(50)`,
     `ALTER TABLE "T_Ventes" ADD COLUMN IF NOT EXISTS "HEUREENREG" TIME`,
@@ -64,9 +66,15 @@ async function init() {
     `ALTER TABLE "T_Inventaire" ALTER COLUMN "StockVendu" TYPE FLOAT8`,
     `ALTER TABLE "appro" ADD COLUMN IF NOT EXISTS "NumVente" VARCHAR(50)`,
     `ALTER TABLE "VERSEMENTINTERNE" ADD COLUMN IF NOT EXISTS "CREDITSPAYES" BIGINT DEFAULT 0`,
+    `ALTER TABLE "VERSEMENTINTERNE" ADD COLUMN IF NOT EXISTS "WAVE" BIGINT DEFAULT 0`,
+    `ALTER TABLE "VERSEMENTINTERNE" ADD COLUMN IF NOT EXISTS "OM" BIGINT DEFAULT 0`,
+    `ALTER TABLE "VERSEMENTINTERNE" ADD COLUMN IF NOT EXISTS "ESPECE" BIGINT DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS "parametres" ("cle" VARCHAR(80) PRIMARY KEY, "valeur" TEXT)`,
   ];
   for (const m of migrations) await q(m);
+
+  // Application restaurant (RESTO DU FORESTIER)
+  await q(fs.readFileSync(path.join(__dirname, 'resto_schema.sql'), 'utf8'));
 
   // Valeurs par défaut
   const num = await q(`SELECT rid FROM "numero" LIMIT 1`);
@@ -75,6 +83,10 @@ async function init() {
   }
   const defaults = {
     nom_etablissement: 'LE REPOS DU FORESTIER',
+    resto_nom: 'RESTO DU FORESTIER',
+    resto_format_ticket: 'T{AA}-{N5}',
+    resto_compteur: '0',
+    resto_bloquer_stock: 'oui',
     format_vente: 'V{AA}-{N}',
     format_appro: '{AA}-{N}',
     format_produit: '{N4}{L2}',
@@ -87,11 +99,22 @@ async function init() {
   if (!g.rows[0].n) {
     await q(`INSERT INTO "T_Groupe"(libelle) VALUES ('SUPERADMIN'),('ADMINISTRATEUR'),('CAISSIER')`);
   }
+  // Le super administrateur a accès aux deux applications
+  await q(`UPDATE "T_Utilisateur" SET "Application"='TOUS' WHERE UPPER("NomGroupe") LIKE '%SUPER%' AND "Application"='MAQUIS'
+    AND NOT EXISTS (SELECT 1 FROM "parametres" WHERE cle='acces_superadmin_fait')`);
+  await q(`INSERT INTO "parametres"(cle,valeur) VALUES ('acces_superadmin_fait','oui') ON CONFLICT (cle) DO NOTHING`);
+  // Compte administrateur du restaurant (identifiants séparés)
+  const ra = await q(`SELECT 1 FROM "T_Utilisateur" WHERE "Application"='RESTO' LIMIT 1`);
+  if (!ra.rowCount) {
+    const pwd = process.env.RESTO_ADMIN_PASSWORD || 'resto123';
+    await q(`INSERT INTO "T_Utilisateur"("Nom","Prenom","Login","mdp","NomGroupe","Application") VALUES ('Restaurant','Admin','adminresto',$1,'ADMINISTRATEUR','RESTO')`, [bcrypt.hashSync(pwd, 10)]);
+    console.log(`Compte administrateur du restaurant créé (login: adminresto / mot de passe: ${process.env.RESTO_ADMIN_PASSWORD ? '***' : 'resto123'})`);
+  }
   const sa = await q(`SELECT 1 FROM "T_Utilisateur" WHERE UPPER("NomGroupe") LIKE '%SUPER%' LIMIT 1`);
   if (!sa.rowCount) {
     const pwd = process.env.SUPERADMIN_PASSWORD || 'admin123';
     await q(
-      `INSERT INTO "T_Utilisateur"("Nom","Prenom","Login","mdp","NomGroupe") VALUES ('Super','Admin','superadmin',$1,'SUPERADMIN')`,
+      `INSERT INTO "T_Utilisateur"("Nom","Prenom","Login","mdp","NomGroupe","Application") VALUES ('Super','Admin','superadmin',$1,'SUPERADMIN','TOUS')`,
       [bcrypt.hashSync(pwd, 10)]
     );
     console.log(`Compte superadmin créé (login: superadmin / mot de passe: ${process.env.SUPERADMIN_PASSWORD ? '***' : 'admin123'})`);

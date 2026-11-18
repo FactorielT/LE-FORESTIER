@@ -101,9 +101,8 @@ const Pages = {};
       let date = params.date || today();
       let data = null; // {produits, creditJour, existe}
       let lignes = []; // {rid, Lib, qteInitial, qteAppro, depart, restant, vendu, pu, prixFour}
-      let rep = { credit: 0, wave: 0, om: 0, espece: 0 };
       const KEY = () => 'vente-brouillon-' + date;
-      const saveDraft = () => { try { localStorage.setItem(KEY(), JSON.stringify({ lignes, rep })); } catch {} };
+      const saveDraft = () => { try { localStorage.setItem(KEY(), JSON.stringify({ lignes })); } catch {} };
       const loadDraft = () => { try { return JSON.parse(localStorage.getItem(KEY()) || 'null'); } catch { return null; } };
 
       el.innerHTML = `<div class="page-title">Ventes des Boissons</div>
@@ -182,8 +181,6 @@ const Pages = {};
           zone.dataset.gap = `Attention : aucune vente n'est enregistrée du ${dfr(data.prochaine)} au ${dfr(addDays(date, -1))}. Si l'établissement était ouvert ces jours-là, enregistrez d'abord ces ventes (elles doivent être saisies dans l'ordre des dates).`;
         } else zone.dataset.gap = '';
         lignes = [];
-        rep = modif ? { credit: Number(modif.CREDIT) || 0, wave: Number(modif.WAVE) || 0, om: Number(modif.OM) || 0, espece: Number(modif.ESPECE) || 0 }
-          : { credit: data.creditJour || 0, wave: 0, om: 0, espece: 0 };
         if (modif) {
           for (const l of data.lignesExistantes) {
             const p = data.produits.find((x) => x.rid === l.rid);
@@ -196,7 +193,7 @@ const Pages = {};
             const p = data.produits.find((x) => x.rid === l.rid);
             if (p && n(l.restant) <= p.depart) bl.push(calc(p, l.restant));
           }
-          if (bl.length) { lignes = bl; rep = { ...rep, ...draft.rep }; toast('Saisie en cours restaurée (' + bl.length + ' boisson(s)).'); }
+          if (bl.length) { lignes = bl; toast('Saisie en cours restaurée (' + bl.length + ' boisson(s)).'); }
         }
         drawSaisie();
       }
@@ -262,41 +259,11 @@ const Pages = {};
       function drawTotaux() {
         const tv = sum(lignes, 'total'), ta = sum(lignes, 'achat');
         $('#v-tot').innerHTML = `
-          <div class="kv"><span>Total Vente</span><span class="val cyan" id="t-tv">${money(tv)}</span></div>
+          <div class="kv"><span>Total Vente</span><span class="val cyan big-total" id="t-tv">${money(tv)}</span></div>
           <div class="kv"><span>Total Achat</span><b>${money(ta)}</b></div>
           <div class="kv"><span>Bénéfice</span><span class="val lime">${money(tv - ta)}</span></div>
-          <div style="height:10px"></div>
-          <div class="repartition">
-            <div class="field credit"><label>Total Crédit Jour</label><input class="input" id="r-credit"></div>
-            <div class="field"><label>Total Wave</label><input class="input" id="r-wave"></div>
-            <div class="field"><label>Total OM</label><input class="input" id="r-om"></div>
-            <div class="field"><label>Total ESPÈCE</label><input class="input" id="r-espece"></div>
-          </div>
-          <div class="muted" id="r-cr" style="margin:-4px 0 6px"></div>
-          <div class="ecart" id="r-ecart"></div>
-          <div class="btn-bar"><button class="btn sec" id="r-auto" title="Mettre le reste en espèces">${ic('wallet')} Reste en espèces</button>
-            <button class="btn lg" id="v-valider" ${lignes.length ? '' : 'disabled'}>${ic('check')} ${modif ? 'Enregistrer les modifications' : 'Valider Vente'}</button></div>
-          <p class="muted center" style="margin:8px 0 0">La somme Crédit + Wave + OM + Espèce doit être égale au Total Vente.</p>`;
-        const inputs = {};
-        for (const k of ['credit', 'wave', 'om', 'espece']) {
-          inputs[k] = moneyInput($('#r-' + k), (v) => { rep[k] = v; majEcart(); saveDraft(); });
-          inputs[k].set(rep[k] || 0);
-        }
-        const majEcart = () => {
-          const cj = data.creditJour || 0;
-          $('#r-cr').innerHTML = `Créances déjà enregistrées pour ce jour : <b>${money(cj)}</b>`
-            + (rep.credit !== cj ? ` · <span style="color:var(--red);font-weight:600">${rep.credit > cj ? `${money(rep.credit - cj)} de créances à saisir dans la rubrique Créances avant la fermeture` : 'le crédit saisi est inférieur aux créances enregistrées'}</span>` : ' ✓');
-          const s = rep.credit + rep.wave + rep.om + rep.espece;
-          const d = tv - s;
-          const e = $('#r-ecart');
-          e.className = 'ecart ' + (d === 0 ? 'ok' : 'ko');
-          e.textContent = d === 0 ? '✓ Répartition correcte' : d > 0 ? `Reste à répartir : ${money(d)}` : `Excédent de ${money(-d)}`;
-        };
-        majEcart();
-        $('#r-auto').addEventListener('click', () => {
-          rep.espece = Math.max(0, tv - rep.credit - rep.wave - rep.om);
-          inputs.espece.set(rep.espece); majEcart(); saveDraft();
-        });
+          <div class="btn-bar"><button class="btn lg" id="v-valider" ${lignes.length ? '' : 'disabled'}>${ic('check')} ${modif ? 'Enregistrer les modifications' : 'Valider la vente'}</button></div>
+          <p class="muted center" style="margin:8px 0 0">La répartition Wave / OM / Espèce et le versement se font à la <b>fermeture de caisse</b>.</p>`;
         $('#v-valider').addEventListener('click', valider);
       }
 
@@ -347,18 +314,13 @@ const Pages = {};
 
       async function valider() {
         const tv = sum(lignes, 'total');
-        const s = rep.credit + rep.wave + rep.om + rep.espece;
-        if (s !== tv) return alert(`La somme des 4 champs (Crédit + Wave + OM + Espèce = <b>${money(s)}</b>) doit être égale au Total Vente (<b>${money(tv)}</b>).`, 'Répartition incorrecte');
-        if (!(await confirm(`${modif ? `Enregistrer les modifications de la vente <b>${esc(modif.NumVentes)}</b> ?<br><br>` : 'Valider cette vente ?<br><br>'}<b>Date de la vente :</b> ${dlong(date)}<br><b>Date d'enregistrement :</b> ${dlong(modif ? modif.DATEENREG : today())}<br><br>${lignes.length} boisson(s) · Total <b>${money(tv)}</b> · Crédit <b>${money(rep.credit)}</b>`, { title: modif ? 'Modifier la vente ?' : 'Valider la vente ?' }))) return;
+        if (!(await confirm(`${modif ? `Enregistrer les modifications de la vente <b>${esc(modif.NumVentes)}</b> ?<br><br>` : 'Valider cette vente ?<br><br>'}<b>Date de la vente :</b> ${dlong(date)}<br><b>Date d'enregistrement :</b> ${dlong(modif ? modif.DATEENREG : today())}<br><br>${lignes.length} boisson(s) · Total vente <b>${money(tv)}</b>`, { title: modif ? 'Modifier la vente ?' : 'Valider la vente ?' }))) return;
         try {
-          const r = await post('/ventes', { date, numero: modif ? modif.NumVentes : undefined, lignes: lignes.map((l) => ({ rid: l.rid, restant: l.restant })), ...rep });
+          const r = await post('/ventes', { date, numero: modif ? modif.NumVentes : undefined, lignes: lignes.map((l) => ({ rid: l.rid, restant: l.restant })) });
           try { localStorage.removeItem(KEY()); } catch {}
           ok(r.modification ? `Vente ${r.numero} modifiée avec succès.` : `Vente ${r.numero} enregistrée avec succès.`);
           await new Promise((res) => setTimeout(res, 900));
-          if (r.credit !== r.creancesSaisies) {
-            if (await confirm(`Le total crédit de la vente (<b>${money(r.credit)}</b>) n'est pas encore égal aux créances enregistrées individuellement pour le ${dfr(date)} (<b>${money(r.creancesSaisies)}</b>).<br><br>Voulez-vous enregistrer les créances maintenant ?`,
-              { title: 'Créances à enregistrer', okText: 'Oui, saisir les créances' })) return go('/creances/credit', { date });
-          } else if (await confirm(`Voulez-vous passer à la <b>fermeture de caisse</b> du ${dfr(date)} ?<br><span class="muted">Avant la fermeture, enregistrez aussi les dépenses et les créances de la journée s'il y en a.</span>`, { title: 'Fermeture de caisse' })) {
+          if (await confirm(`Voulez-vous passer à la <b>fermeture de caisse</b> du ${dfr(date)} ?<br><span class="muted">Avant la fermeture, enregistrez aussi les dépenses et les créances de la journée s'il y en a.</span>`, { title: 'Fermeture de caisse' })) {
             return go('/caisse', { date });
           }
           afficher();
@@ -591,10 +553,7 @@ const Pages = {};
         const d = $('#c-date').value;
         try {
           const s = await get('/caisse?date=' + d);
-          if (!s.venteExiste) { $('#c-etat').innerHTML = `<div class="notice info">${ic('info')}<div>Pas encore de vente pour le ${dfr(d)}. Créances déjà saisies ce jour : <b>${money(s.creances)}</b> (elles seront reprises automatiquement dans la vente).</div></div>`; return; }
-          const reste = s.venteCredit - s.creances;
-          $('#c-etat').innerHTML = `<div class="notice ${reste === 0 ? 'ok' : ''}">${ic(reste === 0 ? 'check' : 'warn')}<div>Crédit déclaré dans la vente ${esc(s.numeroVente)} : <b>${money(s.venteCredit)}</b><br>
-            Créances enregistrées pour ce jour : <b>${money(s.creances)}</b><br>${reste === 0 ? '✓ Les créances correspondent au crédit de la vente.' : reste > 0 ? `Reste à enregistrer : <b>${money(reste)}</b>` : `Les créances dépassent le crédit de la vente de <b>${money(-reste)}</b> : modifiez la vente.`}</div></div>`;
+          $('#c-etat').innerHTML = `<div class="notice info">${ic('info')}<div>Créances déjà enregistrées pour le ${dfr(d)} : <b>${money(s.creances)}</b>${s.existe ? ' · <b>caisse fermée</b>' : ''}<br><span class="muted">Le total des créances du jour est déduit du montant à verser à la fermeture de caisse.</span></div></div>`;
         } catch { $('#c-etat').innerHTML = ''; }
       };
       $('#c-date').addEventListener('change', etat);
@@ -854,10 +813,11 @@ const Pages = {};
         }
         premier = false;
         const f = s.existe;
-        const line = (lbl, v, color, cls = '') => `<div class="kv"><span style="font-weight:700;font-size:12.5px;color:${color}">${lbl}</span><span class="val ${cls}" style="background:#fff;border:1px solid var(--line);color:${color}">${money(v)}</span></div>`;
+        const line = (lbl, v, color, signe = '') => `<div class="kv"><span style="font-weight:700;font-size:12.5px;color:${color}">${signe ? `<span class="sg">${signe}</span>` : ''}${lbl}</span><span class="val" style="background:#fff;border:1px solid var(--line);color:${color}">${money(v)}</span></div>`;
         const q = `date=${date}`;
-        const creditOk = s.venteCredit === s.creances;
-        const pretes = s.venteExiste && creditOk;
+        const pretes = s.venteExiste;
+        const V = f ? { hier: f.FONDSDECAISSEHIER, vente: f.MTJRCTN, payes: f.CREDITSPAYES, creances: f.CREANCES, dep: f.MTDEPENSES, aVerser: f.SOMMES } :
+          { hier: s.caisseHier, vente: s.totalVente, payes: s.creditsPayes, creances: s.creances, dep: s.depenses, aVerser: s.sommes };
         $('#k-body').innerHTML = `
           ${f ? `<div class="notice ok">${ic('lock')}<div>Caisse fermée le ${dfr(f.DATEENREG)} à ${hm(f.HEUREVERSE)} par ${esc(f.AGENTS || '')}.</div></div>` : `
           <div class="card-title" style="margin-top:4px">${ic('list')} Avant de fermer la caisse, enregistrez :</div>
@@ -865,30 +825,52 @@ const Pages = {};
             ${etape(null, "1. L'approvisionnement (s'il y en a eu)", s.appro.n ? `${s.appro.n} approvisionnement(s) ce jour · ${money(s.appro.total)}` : 'Aucun approvisionnement ce jour', `/appro?${q}`, 'Appro')}
             ${etape(s.venteExiste, '2. La vente de la journée', s.venteExiste ? `Vente ${esc(s.numeroVente)} · ${money(s.totalVente)}` : 'Obligatoire : aucune vente enregistrée pour ce jour', `/ventes?${q}`, s.venteExiste ? 'Voir / modifier' : 'Saisir')}
             ${etape(null, "3. Les dépenses (s'il y en a)", s.nbDepenses ? `${s.nbDepenses} dépense(s) · ${money(s.depenses)}` : 'Aucune dépense ce jour', `/depenses?${q}`, 'Dépenses')}
-            ${etape(s.venteExiste ? creditOk : null, "4. Les créances (s'il y en a)", `Crédit de la vente : ${money(s.venteCredit)} · Créances saisies : ${money(s.creances)}${!creditOk ? (s.venteCredit > s.creances ? ` · <b>reste ${money(s.venteCredit - s.creances)} à saisir</b>` : ' · <b>créances supérieures au crédit de la vente</b>') : ''}`, `/creances/credit?${q}`, 'Créances')}
+            ${etape(null, "4. Les créances (s'il y en a)", s.creances ? `Créances du jour : ${money(s.creances)}` : 'Aucune créance ce jour', `/creances/credit?${q}`, 'Créances')}
           </div>`}
-          ${line("CAISSE D'HIER", f ? f.FONDSDECAISSEHIER : s.caisseHier, '#999')}
-          ${line('TOTAL VENTE', f ? f.MTJRCTN : s.totalVente, '#7b1fe0')}
-          ${line('TOTAL CRÉDITS PAYÉS JOUR', f ? f.CREDITSPAYES : s.creditsPayes, '#7b1fe0')}
-          ${line('TOTAL CRÉANCES DU JOUR', f ? f.CREANCES : s.creances, '#7b1fe0')}
-          ${line('TOTAL DÉPENSES', f ? f.MTDEPENSES : s.depenses, '#0f8a8a')}
-          ${line('CAISSE [(Vente + Crédit payé) − (Créance + Dépense)]', f ? f.SOMMES : s.sommes, 'var(--navy)')}
-          <div class="kv"><span style="font-weight:700;font-size:12.5px;color:var(--red)">CAISSE DU JOUR À LA FERMETURE</span>
-            ${f ? `<span class="val red">${money(f.MTVERSER)}</span>` : `<input class="input big" id="k-verse" style="max-width:190px;color:var(--red)" placeholder="0" ${pretes ? '' : 'disabled'}>`}</div>
-          <div class="kv"><span style="font-weight:700;font-size:12.5px">ÉCART</span><b id="k-ecart">${money(f ? f.ECART : s.sommes)}</b></div>
-          ${!f && !pretes ? `<div class="notice err" style="margin-top:12px">${ic('warn')}<div>${!s.venteExiste ? "La vente de cette journée doit être enregistrée avant la fermeture." : "Le total des créances enregistrées individuellement doit être égal au total crédit de la vente avant la fermeture."}</div></div>` : ''}
+          <div class="card-title" style="margin-top:6px">${ic('report')} Situation de la journée</div>
+          ${line('MONTANT DU DERNIER VERSEMENT', V.hier, '#888')}
+          ${line('MONTANT TOTAL VENTE DU JOUR', V.vente, '#7b1fe0', '+')}
+          ${V.payes ? line('CRÉDITS PAYÉS CE JOUR', V.payes, '#7b1fe0', '+') : ''}
+          ${line('TOTAL CRÉANCES', V.creances, '#c62828', '−')}
+          ${line('TOTAL DÉPENSES', V.dep, '#0f8a8a', '−')}
+          <div class="a-verser"><span>MONTANT TOTAL À VERSER AUJOURD'HUI</span><b>${money(V.aVerser)}</b></div>
+
+          <div class="card-title" style="margin-top:14px">${ic('wallet')} Répartition du versement</div>
+          <div class="repartition rep3">
+            <div class="field"><label>Wave</label>${f ? `<span class="val">${money(f.WAVE)}</span>` : `<input class="input" id="k-wave" ${pretes ? '' : 'disabled'}>`}</div>
+            <div class="field"><label>Orange Money (OM)</label>${f ? `<span class="val">${money(f.OM)}</span>` : `<input class="input" id="k-om" ${pretes ? '' : 'disabled'}>`}</div>
+            <div class="field"><label>Espèce</label>${f ? `<span class="val">${money(f.ESPECE)}</span>` : `<input class="input" id="k-espece" ${pretes ? '' : 'disabled'}>`}</div>
+          </div>
+          ${f ? '' : `<div class="row" style="justify-content:flex-end;margin:-4px 0 8px"><button class="btn sec sm" id="k-auto" ${pretes ? '' : 'disabled'}>${ic('wallet')} Reste en espèces</button></div>`}
+          <div class="kv"><span style="font-weight:700">TOTAL VERSÉ</span><b id="k-verse">${money(f ? f.MTVERSER : 0)}</b></div>
+          <div class="ecart" id="k-ecart"></div>
+          ${!f && !pretes ? `<div class="notice err" style="margin-top:12px">${ic('warn')}<div>La vente de cette journée doit être enregistrée avant la fermeture.</div></div>` : ''}
           <div class="btn-bar">${f ? (adminOnly() ? `<button class="btn red" id="k-reo">${ic('refresh')} Rouvrir la caisse</button>` : '')
-            : `<button class="btn sec" id="k-act" style="background:#2196f3;color:#fff;border:0">${ic('refresh')} Actualiser</button><button class="btn lg" id="k-val" ${pretes ? '' : 'disabled'}>${ic('check')} Valider</button>`}</div>`;
+            : `<button class="btn sec" id="k-act" style="background:#2196f3;color:#fff;border:0">${ic('refresh')} Actualiser</button><button class="btn lg" id="k-val" ${pretes ? '' : 'disabled'}>${ic('check')} Valider la fermeture</button>`}</div>`;
+        const majEcart = (verse) => {
+          const d = V.aVerser - verse;
+          const e = $('#k-ecart');
+          e.className = 'ecart ' + (d === 0 ? 'ok' : 'ko');
+          e.textContent = d === 0 ? '✓ Le versement correspond au montant à verser' : d > 0 ? `Écart : il manque ${money(d)}` : `Écart : excédent de ${money(-d)}`;
+        };
         if (!f) {
-          const v = moneyInput($('#k-verse'), (x) => { $('#k-ecart').textContent = money(s.sommes - x); });
+          const R = { wave: 0, om: 0, espece: 0 };
+          const tot = () => R.wave + R.om + R.espece;
+          const inp = {};
+          const maj = () => { $('#k-verse').textContent = money(tot()); majEcart(tot()); };
+          for (const k of ['wave', 'om', 'espece']) { inp[k] = moneyInput($('#k-' + k), (v) => { R[k] = v; maj(); }); inp[k].set(0); }
+          maj();
+          $('#k-auto').addEventListener('click', () => { R.espece = Math.max(0, V.aVerser - R.wave - R.om); inp.espece.set(R.espece); maj(); });
           $('#k-act').addEventListener('click', () => load().catch(err));
           $('#k-val').addEventListener('click', async () => {
-            if ($('#k-verse').value === '') return err('Saisissez la caisse du jour à la fermeture.');
-            if (!(await confirm(`Voulez-vous fermer la caisse du <b>${dfr(date)}</b> ?<br><br>Caisse calculée : <b>${money(s.sommes)}</b><br>Caisse à la fermeture : <b>${money(v.get())}</b><br>Écart : <b>${money(s.sommes - v.get())}</b><br><span class="muted">Après la fermeture, la vente, les dépenses et les créances de ce jour ne pourront plus être modifiées.</span>`))) return;
-            try { await post('/caisse', { date, montantVerse: v.get() }); ok('Caisse fermée avec succès.'); load(); } catch (x) { err(x); }
+            const d = V.aVerser - tot();
+            if (!(await confirm(`Voulez-vous fermer la caisse du <b>${dfr(date)}</b> ?<br><br>Montant à verser : <b>${money(V.aVerser)}</b><br>Wave : <b>${money(R.wave)}</b> · OM : <b>${money(R.om)}</b> · Espèce : <b>${money(R.espece)}</b><br>Total versé : <b>${money(tot())}</b>
+              ${d ? `<br><span style="color:var(--red);font-weight:700">Écart de ${money(Math.abs(d))} (${d > 0 ? 'manquant' : 'excédent'})</span>` : ''}<br><br><span class="muted">Après la fermeture, la vente, les dépenses et les créances de ce jour ne pourront plus être modifiées.</span>`))) return;
+            try { await post('/caisse', { date, ...R }); ok('Caisse fermée avec succès.'); load(); } catch (x) { err(x); }
           });
-        } else if ($('#k-reo')) {
-          $('#k-reo').addEventListener('click', async () => {
+        } else {
+          majEcart(f.MTVERSER);
+          if ($('#k-reo')) $('#k-reo').addEventListener('click', async () => {
             if (!(await confirm('Voulez-vous rouvrir la caisse de cette date ? La fermeture sera supprimée.', { danger: true }))) return;
             try { await del('/caisse/' + f.rid); ok('Caisse rouverte avec succès.'); load(); } catch (x) { err(x); }
           });
@@ -897,7 +879,7 @@ const Pages = {};
       $('#k-date').addEventListener('change', () => load().catch(err));
       await load();
       if (!$('.notice.ok', el)) {
-        alert(`Avant de fermer la caisse, merci d'enregistrer :<br><br>• l'<b>approvisionnement</b> de la journée (s'il y en a eu)<br>• la <b>vente</b> de la journée<br>• les <b>dépenses</b> (s'il y en a)<br>• les <b>créances</b> (s'il y en a) — leur total doit être égal au crédit de la vente`, 'Fermeture de caisse');
+        alert(`Avant de fermer la caisse, merci d'enregistrer :<br><br>• l'<b>approvisionnement</b> de la journée (s'il y en a eu)<br>• la <b>vente</b> de la journée<br>• les <b>dépenses</b> (s'il y en a)<br>• les <b>créances</b> (s'il y en a)<br><br>Le montant à verser sera ensuite réparti entre <b>Wave, OM et Espèce</b>.`, 'Fermeture de caisse');
       }
     },
   };
@@ -1095,11 +1077,12 @@ const Pages = {};
         table($('#bc-tbl'), [
           { t: 'Date Enreg', f: (r) => dfr(r.DATEENREG) }, { t: 'Date versé', f: (r) => `<b>${dfr(r.DATEVERSE)}</b>`, first: 1 },
           { t: 'Vente jour', r: 1, f: (r) => money(r.MTJRCTN) }, { t: 'Dépense', r: 1, f: (r) => money(r.MTDEPENSES) }, { t: 'Créances', r: 1, f: (r) => money(r.CREANCES) },
-          { t: 'Crédits payés', r: 1, f: (r) => money(r.CREDITSPAYES) }, { t: 'Caisse Hier', r: 1, f: (r) => money(r.FONDSDECAISSEHIER) },
-          { t: 'Sommes', r: 1, f: (r) => money(r.SOMMES) }, { t: 'Montant Versé', r: 1, f: (r) => `<b>${money(r.MTVERSER)}</b>` },
+          { t: 'Crédits payés', r: 1, f: (r) => money(r.CREDITSPAYES) }, { t: 'Dernier versement', r: 1, f: (r) => money(r.FONDSDECAISSEHIER) },
+          { t: 'À verser', r: 1, f: (r) => money(r.SOMMES) }, { t: 'Wave', r: 1, f: (r) => money(r.WAVE) }, { t: 'OM', r: 1, f: (r) => money(r.OM) }, { t: 'Espèce', r: 1, f: (r) => money(r.ESPECE) },
+          { t: 'Montant Versé', r: 1, f: (r) => `<b>${money(r.MTVERSER)}</b>` },
           { t: 'Écart', r: 1, f: (r) => `<b style="color:${r.ECART ? 'var(--red)' : 'inherit'}">${money(r.ECART)}</b>` }, { t: 'Heure versé', f: (r) => hm(r.HEUREVERSE) },
         ], rows, { green: 1, empty: 'Aucune fermeture sur la période.',
-          foot: ['Total', '', money(sum(rows, 'MTJRCTN')), money(sum(rows, 'MTDEPENSES')), money(sum(rows, 'CREANCES')), money(sum(rows, 'CREDITSPAYES')), '', money(sum(rows, 'SOMMES')), money(sum(rows, 'MTVERSER')), money(sum(rows, 'ECART')), ''] });
+          foot: ['Total', '', money(sum(rows, 'MTJRCTN')), money(sum(rows, 'MTDEPENSES')), money(sum(rows, 'CREANCES')), money(sum(rows, 'CREDITSPAYES')), '', money(sum(rows, 'SOMMES')), money(sum(rows, 'WAVE')), money(sum(rows, 'OM')), money(sum(rows, 'ESPECE')), money(sum(rows, 'MTVERSER')), money(sum(rows, 'ECART')), ''] });
         $('#bc-tot').innerHTML = `<div class="stat"><small>Total versé</small><b class="n">${money(sum(rows, 'MTVERSER'))}</b></div>
           <div class="stat"><small>Total ventes</small><b>${money(sum(rows, 'MTJRCTN'))}</b></div><div class="stat"><small>Total dépenses</small><b class="r">${money(sum(rows, 'MTDEPENSES'))}</b></div>
           <div class="stat"><small>Total écarts</small><b class="r">${money(sum(rows, 'ECART'))}</b></div>`;

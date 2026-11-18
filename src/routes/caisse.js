@@ -73,9 +73,11 @@ router.get('/caisse', h(async (req, res) => {
 }));
 
 router.post('/caisse', h(async (req, res) => {
-  const { date, montantVerse } = req.body || {};
+  const { date } = req.body || {};
   if (!isDate(date)) throw fail('Date invalide.');
-  const verse = Math.round(num(montantVerse));
+  const wave = Math.round(num(req.body.wave)), om = Math.round(num(req.body.om)), espece = Math.round(num(req.body.espece));
+  if (wave < 0 || om < 0 || espece < 0) throw fail('Les montants Wave, OM et Espèce ne peuvent pas être négatifs.');
+  const verse = wave + om + espece;
   const out = await tx(async (c) => {
     await c.query(`LOCK TABLE "VERSEMENTINTERNE" IN SHARE ROW EXCLUSIVE MODE`);
     const ex = await c.query(`SELECT 1 FROM "VERSEMENTINTERNE" WHERE "DATEVERSE"=$1`, [date]);
@@ -85,25 +87,22 @@ router.post('/caisse', h(async (req, res) => {
     const avant = (await c.query(`SELECT "NumVentes", "DateVente" FROM "T_Ventes" v WHERE "DateVente" < $1 AND COALESCE("Fermer",false)=false
       AND NOT EXISTS (SELECT 1 FROM "VERSEMENTINTERNE" f WHERE f."DATEVERSE"=v."DateVente") ORDER BY "DateVente" LIMIT 1`, [date])).rows[0];
     if (avant) throw fail(`La caisse de la vente ${avant.NumVentes} du ${avant.DateVente.split('-').reverse().join('/')} doit être fermée d'abord.`);
-    if (s.venteCredit !== s.creances) {
-      throw fail(`Le total crédit de la vente (${s.venteCredit.toLocaleString('fr-FR')}) est différent du total des créances enregistrées individuellement pour ce jour (${s.creances.toLocaleString('fr-FR')}). `
-        + (s.venteCredit > s.creances ? `Enregistrez les créances restantes (${(s.venteCredit - s.creances).toLocaleString('fr-FR')}) dans la rubrique Créances avant de fermer la caisse.` : 'Corrigez les créances ou modifiez la vente avant de fermer la caisse.'));
-    }
     await c.query(
       `INSERT INTO "VERSEMENTINTERNE"("AGENTS","SOMMES","MTDEPENSES","MTVERSER","DATEVERSE","HEUREVERSE","MOISVERSE","ANNEEVERSE","MTJRCTN","ECART",
-        "CREANCES","FONDSDECAISSEHIER","FermeCaisse","DATEENREG","CREDITSPAYES") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13,$14)`,
+        "CREANCES","FONDSDECAISSEHIER","FermeCaisse","DATEENREG","CREDITSPAYES","WAVE","OM","ESPECE") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13,$14,$15,$16,$17)`,
       [req.user.nom, s.sommes, s.depenses, verse, date, nowTime(), moisDe(date), anneeDe(date), s.totalVente, s.sommes - verse,
-        s.creances, s.caisseHier, today(), s.creditsPayes]
+        s.creances, s.caisseHier, today(), s.creditsPayes, wave, om, espece]
     );
-    await c.query(`UPDATE "T_Ventes" SET "Fermer"=true WHERE "DateVente"=$1`, [date]);
-    return { ...s, verse, ecart: s.sommes - verse };
+    // La répartition est aussi reportée sur la vente du jour (bilans / statistiques)
+    await c.query(`UPDATE "T_Ventes" SET "Fermer"=true, "WAVE"=$2, "OM"=$3, "ESPECE"=$4, "CREDIT"=$5 WHERE "DateVente"=$1`, [date, wave, om, espece, s.creances]);
+    return { ...s, verse, wave, om, espece, ecart: s.sommes - verse };
   });
   res.json(out);
 }));
 
 router.get('/caisse/bilan', h(async (req, res) => {
   const r = await q(`SELECT rid id, "DATEENREG", "DATEVERSE", "MTJRCTN", "MTDEPENSES", "CREANCES", COALESCE("CREDITSPAYES",0) "CREDITSPAYES",
-      "FONDSDECAISSEHIER", "SOMMES", "MTVERSER", "ECART", "HEUREVERSE", "AGENTS"
+      "FONDSDECAISSEHIER", "SOMMES", "MTVERSER", COALESCE("WAVE",0) "WAVE", COALESCE("OM",0) "OM", COALESCE("ESPECE",0) "ESPECE", "ECART", "HEUREVERSE", "AGENTS"
     FROM "VERSEMENTINTERNE" WHERE "DATEVERSE" BETWEEN $1 AND $2 ORDER BY "DATEVERSE" DESC`,
   [req.query.du || '1900-01-01', req.query.au || '2999-12-31']);
   res.json(r.rows);
@@ -116,7 +115,7 @@ router.delete('/caisse/:id', admin, h(async (req, res) => {
     const apres = (await c.query(`SELECT "NumVentes" FROM "T_Ventes" WHERE "DateVente" > $1 LIMIT 1`, [f.DATEVERSE])).rows[0];
     if (apres) throw fail(`Impossible de rouvrir : une vente plus récente existe déjà (${apres.NumVentes}). Seule la dernière journée peut être rouverte.`);
     const r = (await c.query(`DELETE FROM "VERSEMENTINTERNE" WHERE rid=$1 RETURNING "DATEVERSE"`, [Number(req.params.id)])).rows[0];
-    if (r) await c.query(`UPDATE "T_Ventes" SET "Fermer"=false WHERE "DateVente"=$1`, [r.DATEVERSE]);
+    if (r) await c.query(`UPDATE "T_Ventes" SET "Fermer"=false, "WAVE"=0, "OM"=0, "ESPECE"=0, "CREDIT"=0 WHERE "DateVente"=$1`, [r.DATEVERSE]);
   });
   res.json({ ok: true });
 }));

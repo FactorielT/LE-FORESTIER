@@ -7,9 +7,14 @@
     title: 'Administration', back: '/', role: 'admin',
     async render(el) {
       const t = [
-        { r: '/admin/numeros', t: 'Numéros automatiques', i: 'hash', c: 'c4' },
-        { r: '/admin/utilisateurs', t: 'Utilisateurs & groupes', i: 'users', c: 'c1' },
-        { r: '/admin/parametres', t: 'Paramètres', i: 'gear', c: 'c9' },
+        ...(App.user.app === 'resto' ? [
+          { r: '/admin/utilisateurs', t: 'Utilisateurs du restaurant', i: 'users', c: 'c1' },
+          { r: '/resto/parametres', t: 'Paramètres restaurant', i: 'gear', c: 'c9' },
+        ] : [
+          { r: '/admin/numeros', t: 'Numéros automatiques', i: 'hash', c: 'c4' },
+          { r: '/admin/utilisateurs', t: 'Utilisateurs & groupes', i: 'users', c: 'c1' },
+          { r: '/admin/parametres', t: 'Paramètres', i: 'gear', c: 'c9' },
+        ]),
         ...(App.isSuper() ? [
           { r: '/admin/import', t: 'Importation des données', i: 'upload', c: 'c2' },
           { r: '/admin/explorer', t: 'Explorateur de la BD', i: 'db', c: 'c7' },
@@ -82,14 +87,15 @@
   Pages['/admin/utilisateurs'] = {
     title: 'Utilisateurs', back: '/admin', role: 'admin',
     async render(el) {
-      el.innerHTML = `<div class="two-col"><div class="card"><div class="card-title">${ic('users')} Utilisateurs <button class="btn sm" id="u-add" style="margin-left:auto">${ic('plus')} Ajouter</button></div><div class="tbl-wrap" id="u-tbl"></div></div>
+      el.innerHTML = `<div class="two-col"><div class="card"><div class="card-title">${ic('users')} Utilisateurs ${App.user.acces === 'TOUS' ? 'des deux applications' : App.user.app === 'resto' ? 'du restaurant' : 'du maquis'} <button class="btn sm" id="u-add" style="margin-left:auto">${ic('plus')} Ajouter</button></div><div class="tbl-wrap" id="u-tbl"></div></div>
         <div class="card"><div class="card-title">${ic('list')} Groupes <button class="btn sm" id="g-add" style="margin-left:auto">${ic('plus')} Ajouter</button></div><div class="tbl-wrap" id="g-tbl"></div>
         <p class="muted">Un groupe dont le nom contient <b>SUPER</b> donne les droits super administrateur, <b>ADMIN</b> les droits administrateur. Les autres groupes sont des utilisateurs simples (caissiers).</p></div></div>`;
       let groupes = [];
       const load = async () => {
         groupes = await get('/admin/groupes');
         const users = await get('/admin/utilisateurs');
-        table($('#u-tbl'), [{ t: 'Nom', f: (u) => `<b>${esc([u.Prenom, u.Nom].filter(Boolean).join(' '))}</b>` }, { t: 'Login', f: (u) => esc(u.Login) }, { t: 'Groupe', f: (u) => `<span class="badge">${esc(u.NomGroupe || '')}</span>` }],
+        table($('#u-tbl'), [{ t: 'Nom', f: (u) => `<b>${esc([u.Prenom, u.Nom].filter(Boolean).join(' '))}</b>` }, { t: 'Login', f: (u) => esc(u.Login) }, { t: 'Groupe', f: (u) => `<span class="badge">${esc(u.NomGroupe || '')}</span>` },
+          { t: 'Application', f: (u) => `<span class="badge ${u.Application === 'RESTO' ? 'amber' : u.Application === 'TOUS' ? 'blue' : ''}">${{ MAQUIS: 'Maquis', RESTO: 'Restaurant', TOUS: 'Les deux' }[u.Application] || u.Application}</span>` }],
           users, { onClick: (u) => edit(u) });
         table($('#g-tbl'), [{ t: 'Libellé', f: (g) => `<b>${esc(g.libelle)}</b>` }, { t: '', r: 1, f: (g) => (App.isSuper() ? `<button class="btn red sm" data-g="${g.id}">${ic('trash')}</button>` : '') }], groupes);
         $$('[data-g]').forEach((b) => b.addEventListener('click', async () => {
@@ -105,7 +111,10 @@
           <div class="field"><label>Prénom</label><input class="input" name="Prenom" value="${esc(u.Prenom || '')}"></div></div>
           <div class="field"><label>Login</label><input class="input" name="Login" autocapitalize="none" value="${esc(u.Login || '')}"></div>
           <div class="field"><label>Mot de passe ${isNew ? '' : '(laisser vide pour ne pas changer)'}</label><input class="input" type="password" name="mdp" autocomplete="new-password"></div>
-          <div class="field"><label>Groupe</label><select class="input" name="NomGroupe">${groupes.map((g) => `<option ${g.libelle === u.NomGroupe ? 'selected' : ''}>${esc(g.libelle)}</option>`).join('')}</select></div>`,
+          <div class="field"><label>Groupe</label><select class="input" name="NomGroupe">${groupes.map((g) => `<option ${g.libelle === u.NomGroupe ? 'selected' : ''}>${esc(g.libelle)}</option>`).join('')}</select></div>
+          ${App.user.acces === 'TOUS' ? `<div class="field"><label>Application</label><select class="input" name="Application">
+            ${[['MAQUIS', App.nom + ' (maquis)'], ['RESTO', App.nomResto + ' (restaurant)'], ['TOUS', 'Les deux applications']].map(([v, l]) => `<option value="${v}" ${(u.Application || (App.user.app === 'resto' ? 'RESTO' : 'MAQUIS')) === v ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select></div>`
+            : `<p class="muted">Ce compte servira uniquement à se connecter à <b>${esc(App.user.app === 'resto' ? App.nomResto : App.nom)}</b>.</p>`}`,
         foot: `${!isNew ? `<button class="btn red" data-del>${ic('trash')} Supprimer</button>` : ''}<button class="btn sec" data-close>Annuler</button><button class="btn" data-ok>${ic('check')} Enregistrer</button>` });
         m.$('[data-ok]').addEventListener('click', async () => {
           if (!(await UI.ask(isNew ? 'Créer cet utilisateur ?' : 'Enregistrer les modifications de cet utilisateur ?'))) return;

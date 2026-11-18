@@ -129,10 +129,8 @@ router.post('/ventes', h(async (req, res) => {
       totalV += tv; totalA += ta;
       calc.push({ p, depart, restant, qteAppro, futur, vendu, pu, pa, tv, ta });
     }
-    const credit = Math.round(num(b.credit)), wave = Math.round(num(b.wave)), om = Math.round(num(b.om)), espece = Math.round(num(b.espece));
-    if (credit + wave + om + espece !== totalV) {
-      throw fail(`La somme Crédit + Wave + OM + Espèce (${(credit + wave + om + espece).toLocaleString('fr-FR')}) doit être égale au Total Vente (${totalV.toLocaleString('fr-FR')}).`);
-    }
+    // La répartition (Wave / OM / Espèce) et les créances sont saisies à la fermeture de caisse
+    const credit = 0, wave = 0, om = 0, espece = 0;
     if (!numero) numero = await nextNumero(c, 'NumInvent', 'format_vente', date, `SELECT 1 FROM "T_Ventes" WHERE "NumVentes"=$1`);
     await c.query(
       `INSERT INTO "T_Ventes"("NumVentes","TotalVentes","TotalAchat","Benefice","WAVE","OM","ESPECE","CREDIT","DateVente","DATEENREG","HEUREENREG","AGENT","Fermer")
@@ -154,8 +152,7 @@ router.post('/ventes', h(async (req, res) => {
         [numero, date, x.p.ref, x.p.Lib]
       );
     }
-    const cj = await creditJour(c, date);
-    return { numero, modification: !!b.numero, dateVente: date, dateEnreg, totalVentes: totalV, totalAchat: totalA, benefice: totalV - totalA, credit, creancesSaisies: cj };
+    return { numero, modification: !!b.numero, dateVente: date, dateEnreg, totalVentes: totalV, totalAchat: totalA, benefice: totalV - totalA };
   });
   res.json(out);
 }));

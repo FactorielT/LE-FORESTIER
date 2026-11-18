@@ -14,6 +14,8 @@ services:
         generateValue: true
       - key: SUPERADMIN_PASSWORD
         sync: false
+      - key: RESTO_ADMIN_PASSWORD
+        sync: false
       - key: TZ
         value: Africa/Abidjan
 databases:
