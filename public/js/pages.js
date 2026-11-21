@@ -797,7 +797,7 @@ const Pages = {};
     async render(el, params) {
       el.innerHTML = `<div class="card" style="max-width:660px;margin:0 auto">
         <div class="date-label" id="k-dl" style="text-transform:none"></div>
-        <div class="toolbar" style="justify-content:flex-end;margin-top:6px"><div class="field"><label>Date de session</label><input class="input" type="date" id="k-date" value="${params.date || today()}" max="${today()}"></div></div>
+        <div class="toolbar k-head" style="margin-top:6px"><div id="k-hier" class="k-hier"></div><div class="spacer"></div><div class="field"><label>Date de session</label><input class="input" type="date" id="k-date" value="${params.date || today()}" max="${today()}"></div></div>
         <div id="k-body"></div></div>`;
       let premier = !params.date;
       const etape = (okk, titre, detail, lien, bouton) => `<div class="step ${okk === true ? 'ok' : okk === false ? 'ko' : 'opt'}">
@@ -817,10 +817,15 @@ const Pages = {};
         const f = s.existe;
         const line = (lbl, v, color, signe = '') => `<div class="kv"><span style="font-weight:700;font-size:12.5px;color:${color}">${signe ? `<span class="sg">${signe}</span>` : ''}${lbl}</span><span class="val" style="background:#fff;border:1px solid var(--line);color:${color}">${money(v)}</span></div>`;
         const q = `date=${date}`;
-        const pretes = s.venteExiste;
+        // Mêmes règles quelle que soit la date choisie : une journée plus ancienne non fermée bloque la fermeture
+        const avant = !f && s.aFermer && s.aFermer.DateVente < date ? s.aFermer : null;
+        const pretes = s.venteExiste && !avant;
         const V = f ? { hier: n(f.FONDSDECAISSEHIER), vente: f.MTJRCTN, payes: f.CREDITSPAYES, creances: f.CREANCES, dep: f.MTDEPENSES, aVerser: n(f.SOMMES), benef: n(f.BENEFICE) || s.benefice } :
           { hier: s.caisseHier, vente: s.totalVente, payes: s.creditsPayes, creances: s.creances, dep: s.depenses, aVerser: s.sommes, benef: s.benefice };
         V.totalJour = f && n(f.TOTALVERSEJOUR) ? n(f.TOTALVERSEJOUR) : V.hier + V.aVerser;
+        // Versement d'hier = montant à verser de la dernière journée fermée (même s'il n'y a pas eu de vente la veille)
+        $('#k-hier').innerHTML = `<small>VERSEMENT D'HIER${s.dateHier ? ` <span>(${dfr(s.dateHier)})</span>` : ''}</small><b>${money(V.hier)}</b>
+          ${s.dateHier && s.dateHier !== addDays(date, -1) ? `<em>dernier versement, ${Math.round((new Date(date + 'T12:00:00') - new Date(s.dateHier + 'T12:00:00')) / 86400000)} jours avant</em>` : ''}`;
         $('#k-body').innerHTML = `
           ${f ? `<div class="notice ok">${ic('lock')}<div>Caisse fermée le ${dfr(f.DATEENREG)} à ${hm(f.HEUREVERSE)} par ${esc(f.AGENTS || '')}.</div></div>` : `
           <div class="card-title" style="margin-top:4px">${ic('list')} Avant de fermer la caisse, enregistrez :</div>
@@ -831,7 +836,6 @@ const Pages = {};
             ${etape(null, "4. Les créances (s'il y en a)", s.creances ? `Créances du jour : ${money(s.creances)}` : 'Aucune créance ce jour', `/creances/credit?${q}`, 'Créances')}
           </div>`}
           <div class="card-title" style="margin-top:6px">${ic('report')} Situation de la journée</div>
-          ${line(`VERSEMENT D'HIER${!f && s.dateHier ? ` (${dfr(s.dateHier)})` : ''}`, V.hier, '#555')}
           ${line('MONTANT TOTAL VENTE DU JOUR', V.vente, '#7b1fe0', '+')}
           <div class="kv benef"><span style="font-weight:700;font-size:12.5px;color:#1b7a2e">BÉNÉFICE DU JOUR <small style="font-weight:500">(sur la vente totale)</small></span><span class="val" style="background:#eaf7ec;border:1px solid #b9e2c0;color:#1b7a2e">${money(V.benef)}</span></div>
           ${V.payes ? line('CRÉDITS PAYÉS CE JOUR', V.payes, '#7b1fe0', '+') : ''}
@@ -849,7 +853,9 @@ const Pages = {};
           ${f ? '' : `<div class="row" style="justify-content:flex-end;margin:-4px 0 8px"><button class="btn sec sm" id="k-auto" ${pretes ? '' : 'disabled'}>${ic('wallet')} Reste en espèces</button></div>`}
           <div class="kv"><span style="font-weight:700">TOTAL RÉPARTI (Wave + OM + Espèce)</span><b id="k-verse">${money(f ? f.MTVERSER : 0)}</b></div>
           <div class="ecart" id="k-ecart"></div>
-          ${!f && !pretes ? `<div class="notice err" style="margin-top:12px">${ic('warn')}<div>La vente de cette journée doit être enregistrée avant la fermeture.</div></div>` : ''}
+          ${!f && !s.venteExiste ? `<div class="notice err" style="margin-top:12px">${ic('warn')}<div>La vente de cette journée doit être enregistrée avant la fermeture.</div></div>` : ''}
+          ${avant ? `<div class="notice err" style="margin-top:12px">${ic('lock')}<div>La caisse de la vente <b>${esc(avant.NumVentes)}</b> du <b>${dfr(avant.DateVente)}</b> n'est pas encore fermée : fermez-la d'abord.
+            <div style="margin-top:8px"><button class="btn red sm" id="k-avant">${ic('power')} Fermer la caisse du ${dfr(avant.DateVente)}</button></div></div></div>` : ''}
           <div class="btn-bar">${f ? (adminOnly() ? `<button class="btn red" id="k-reo">${ic('refresh')} Rouvrir la caisse</button>` : '')
             : `<button class="btn sec" id="k-act" style="background:#2196f3;color:#fff;border:0">${ic('refresh')} Actualiser</button><button class="btn lg" id="k-val" ${pretes ? '' : 'disabled'}>${ic('check')} Valider la fermeture</button>`}</div>`;
         const majEcart = (verse) => {
@@ -867,6 +873,7 @@ const Pages = {};
           maj();
           $('#k-auto').addEventListener('click', () => { R.espece = Math.max(0, V.aVerser - R.wave - R.om); inp.espece.set(R.espece); maj(); });
           $('#k-act').addEventListener('click', () => load().catch(err));
+          if ($('#k-avant')) $('#k-avant').addEventListener('click', () => { $('#k-date').value = avant.DateVente; load().catch(err); });
           $('#k-val').addEventListener('click', async () => {
             const d = V.aVerser - tot();
             if (!(await confirm(`Voulez-vous fermer la caisse du <b>${dfr(date)}</b> ?<br><br>Versement d'hier : <b>${money(V.hier)}</b><br>Montant à verser aujourd'hui : <b>${money(V.aVerser)}</b><br>Montant total versé ce jour : <b>${money(V.totalJour)}</b><br>Bénéfice du jour : <b>${money(V.benef)}</b><br><br>Wave : <b>${money(R.wave)}</b> · OM : <b>${money(R.om)}</b> · Espèce : <b>${money(R.espece)}</b><br>Total réparti : <b>${money(tot())}</b>
@@ -881,7 +888,7 @@ const Pages = {};
           });
         }
       };
-      $('#k-date').addEventListener('change', () => load().catch(err));
+      $('#k-date').addEventListener('change', () => { if ($('#k-date').value) load().catch(err); });
       await load();
       if (!$('.notice.ok', el)) {
         alert(`Avant de fermer la caisse, merci d'enregistrer :<br><br>• l'<b>approvisionnement</b> de la journée (s'il y en a eu)<br>• la <b>vente</b> de la journée<br>• les <b>dépenses</b> (s'il y en a)<br>• les <b>créances</b> (s'il y en a)<br><br>Le montant à verser sera ensuite réparti entre <b>Wave, OM et Espèce</b>.`, 'Fermeture de caisse');

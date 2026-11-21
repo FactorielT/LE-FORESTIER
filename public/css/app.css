@@ -579,3 +579,10 @@ button.app-card .app-go { margin-top: auto; }
 .kpi.wide b { font-size: 17px; line-height: 1.2; }
 @media (max-width: 699px) { .tbl .hide-m { display: none; } .inv-in { width: 64px; } }
 .kv b { white-space: nowrap; }
+.k-head { align-items: flex-end; }
+.k-hier { display: flex; flex-direction: column; gap: 2px; padding: 10px 14px; border-radius: 12px; background: #f3f5f3; border: 1px solid var(--line); min-width: 200px; }
+.k-hier small { font-size: 12px; font-weight: 800; color: #555; letter-spacing: .2px; }
+.k-hier small span { font-weight: 600; color: #888; }
+.k-hier b { font-size: 22px; font-variant-numeric: tabular-nums; color: var(--ink); }
+.k-hier em { font-style: normal; font-size: 11.5px; color: var(--amber, #b26a00); }
+@media (max-width: 599px) { .k-hier { width: 100%; } }
