@@ -130,10 +130,10 @@ const UI = (() => {
    * opts: {onClick(row, tr, idx), onDbl, selectable, foot: [..], empty, rowCls(row)}
    */
   function table(el, cols, rows, opts = {}) {
-    const th = cols.map((c) => `<th class="${c.r ? 'r' : ''} ${c.c ? 'c' : ''} ${c.first ? 'first' : ''}">${c.t}</th>`).join('');
+    const th = cols.map((c) => `<th class="${c.r ? 'r' : ''} ${c.c ? 'c' : ''} ${c.first ? 'first' : ''} ${c.hm ? 'hide-m' : ''}">${c.t}</th>`).join('');
     const body = rows.length
       ? rows.map((row, i) => `<tr data-i="${i}" class="${opts.onClick || opts.selectable ? 'click' : ''} ${opts.rowCls ? opts.rowCls(row) : ''}">${cols
-        .map((c) => `<td class="${c.r ? 'r' : ''} ${c.c ? 'c' : ''} ${c.cls || ''} ${c.first ? 'first' : ''}">${c.f ? c.f(row, i) : esc(row[c.k])}</td>`).join('')}</tr>`).join('')
+        .map((c) => `<td class="${c.r ? 'r' : ''} ${c.c ? 'c' : ''} ${c.cls || ''} ${c.first ? 'first' : ''} ${c.hm ? 'hide-m' : ''}">${c.f ? c.f(row, i) : esc(row[c.k])}</td>`).join('')}</tr>`).join('')
       : `<tr><td colspan="${cols.length}" class="empty">${opts.empty || 'Aucune donnée'}</td></tr>`;
     const foot = opts.foot && rows.length ? `<tfoot><tr>${opts.foot.map((f, i) => `<td class="${cols[i] && cols[i].r ? 'r' : ''}">${f ?? ''}</td>`).join('')}</tr></tfoot>` : '';
     el.innerHTML = `<table class="tbl ${opts.green ? 'green' : ''}"><thead><tr>${th}</tr></thead><tbody>${body}</tbody>${foot}</table>`;

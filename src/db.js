@@ -70,6 +70,21 @@ async function init() {
     `ALTER TABLE "VERSEMENTINTERNE" ADD COLUMN IF NOT EXISTS "OM" BIGINT DEFAULT 0`,
     `ALTER TABLE "VERSEMENTINTERNE" ADD COLUMN IF NOT EXISTS "ESPECE" BIGINT DEFAULT 0`,
     `CREATE TABLE IF NOT EXISTS "parametres" ("cle" VARCHAR(80) PRIMARY KEY, "valeur" TEXT)`,
+    // v9 : bénéfice du jour + montant total versé ce jour à la fermeture, lien appro -> dépense
+    `ALTER TABLE "VERSEMENTINTERNE" ADD COLUMN IF NOT EXISTS "BENEFICE" BIGINT DEFAULT 0`,
+    `ALTER TABLE "VERSEMENTINTERNE" ADD COLUMN IF NOT EXISTS "TOTALVERSEJOUR" BIGINT DEFAULT 0`,
+    `ALTER TABLE "DEPENSEQUOTIDIEN" ADD COLUMN IF NOT EXISTS "NUMAPPRO" VARCHAR(50)`,
+    `INSERT INTO "DEPENSES"("NOMDEPENSE") SELECT 'APPROVISIONNEMENT DE PRODUIT'
+       WHERE NOT EXISTS (SELECT 1 FROM "DEPENSES" WHERE UPPER(TRIM("NOMDEPENSE"))='APPROVISIONNEMENT DE PRODUIT')`,
+    // v9 : inventaires physiques du maquis (comme GESTION MRPA)
+    `CREATE TABLE IF NOT EXISTS "inventaire_maquis" (
+       id BIGSERIAL PRIMARY KEY, num_inv VARCHAR(30), date_inv DATE, heure TIME, ref VARCHAR(50), lib VARCHAR(100),
+       qte_dernier_inv FLOAT8 DEFAULT 0, qte_appro FLOAT8 DEFAULT 0, qte_depart FLOAT8 DEFAULT 0, qte_logiciel FLOAT8 DEFAULT 0,
+       qte_physique FLOAT8 DEFAULT 0, qte_ecart FLOAT8 DEFAULT 0, qte_juste FLOAT8 DEFAULT 0,
+       prix_achat BIGINT DEFAULT 0, prix_vente BIGINT DEFAULT 0, valeur_ecart BIGINT DEFAULT 0,
+       date_debut DATE, date_fin DATE, ajuste BOOLEAN DEFAULT false, utilisateur VARCHAR(80))`,
+    `CREATE INDEX IF NOT EXISTS inventaire_maquis_date ON "inventaire_maquis"(date_inv)`,
+    `CREATE INDEX IF NOT EXISTS inventaire_maquis_num ON "inventaire_maquis"(num_inv)`,
   ];
   for (const m of migrations) await q(m);
 

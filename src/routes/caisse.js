@@ -32,13 +32,14 @@ router.post('/depenses', h(async (req, res) => {
   res.json({ ok: true });
 }));
 router.get('/depenses', h(async (req, res) => {
-  const r = await q(`SELECT "IDDEPENSES" id, "DEPENSE", "MONTANT", "DETAILS", "AGENTS", "DATEDEP", "HEUREDEP" FROM "DEPENSEQUOTIDIEN"
+  const r = await q(`SELECT "IDDEPENSES" id, "DEPENSE", "MONTANT", "DETAILS", "AGENTS", "DATEDEP", "HEUREDEP", "NUMAPPRO" FROM "DEPENSEQUOTIDIEN"
     WHERE "DATEDEP" BETWEEN $1 AND $2 AND ($3::text IS NULL OR "DEPENSE"=$3) ORDER BY "DATEDEP" DESC, "IDDEPENSES" DESC`,
   [req.query.du || '1900-01-01', req.query.au || '2999-12-31', req.query.depense || null]);
   res.json(r.rows);
 }));
 router.delete('/depenses/:id', admin, h(async (req, res) => {
-  const d = (await q(`SELECT "DATEDEP" FROM "DEPENSEQUOTIDIEN" WHERE "IDDEPENSES"=$1`, [Number(req.params.id)])).rows[0];
+  const d = (await q(`SELECT "DATEDEP", "NUMAPPRO" FROM "DEPENSEQUOTIDIEN" WHERE "IDDEPENSES"=$1`, [Number(req.params.id)])).rows[0];
+  if (d && d.NUMAPPRO) throw fail(`Cette dépense vient de l'approvisionnement N° ${d.NUMAPPRO}. Pour l'enlever, supprimez cet approvisionnement (Bilans approvisions).`);
   if (d && d.DATEDEP && req.user.role !== 'superadmin') await verifierJourOuvert(null, d.DATEDEP, 'ou supprimer une dépense');
   await q(`DELETE FROM "DEPENSEQUOTIDIEN" WHERE "IDDEPENSES"=$1`, [Number(req.params.id)]);
   res.json({ ok: true });
@@ -47,17 +48,21 @@ router.delete('/depenses/:id', admin, h(async (req, res) => {
 // ---------- FERMETURE DE CAISSE ----------
 async function situation(c, date) {
   const one = async (sql) => Number((await c.query(sql, [date])).rows[0].t) || 0;
-  const hier = await c.query(`SELECT "MTVERSER" FROM "VERSEMENTINTERNE" WHERE "DATEVERSE" < $1 ORDER BY "DATEVERSE" DESC, rid DESC LIMIT 1`, [date]);
-  const caisseHier = hier.rowCount ? Number(hier.rows[0].MTVERSER) || 0 : 0;
+  // Versement d'hier = montant total à verser de la journée précédente (fermée)
+  const hier = await c.query(`SELECT "SOMMES", "DATEVERSE" FROM "VERSEMENTINTERNE" WHERE "DATEVERSE" < $1 ORDER BY "DATEVERSE" DESC, rid DESC LIMIT 1`, [date]);
+  const caisseHier = hier.rowCount ? Number(hier.rows[0].SOMMES) || 0 : 0;
+  const dateHier = hier.rowCount ? hier.rows[0].DATEVERSE : null;
   const totalVente = await one(`SELECT COALESCE(SUM("TotalVentes"),0) t FROM "T_Ventes" WHERE "DateVente"=$1`);
   const creditsPayes = await one(`SELECT COALESCE(SUM(payer),0) t FROM "paiement" WHERE datepaiement=$1`);
   const creances = await one(`SELECT COALESCE(SUM(montantcreance),0) t FROM "creancier" WHERE datecreance=$1`);
   const depenses = await one(`SELECT COALESCE(SUM("MONTANT"),0) t FROM "DEPENSEQUOTIDIEN" WHERE "DATEDEP"=$1`);
-  const v = (await c.query(`SELECT "NumVentes", COALESCE("CREDIT",0) credit FROM "T_Ventes" WHERE "DateVente"=$1 LIMIT 1`, [date])).rows[0];
+  const v = (await c.query(`SELECT "NumVentes", COALESCE("CREDIT",0) credit, COALESCE("Benefice",0) benefice FROM "T_Ventes" WHERE "DateVente"=$1 LIMIT 1`, [date])).rows[0];
+  const depensesAppro = await one(`SELECT COALESCE(SUM("MONTANT"),0) t FROM "DEPENSEQUOTIDIEN" WHERE "DATEDEP"=$1 AND "NUMAPPRO" IS NOT NULL`);
   const venteExiste = !!v;
   const venteCredit = v ? Number(v.credit) : 0;
-  return { caisseHier, totalVente, creditsPayes, creances, depenses, sommes: totalVente + creditsPayes - (creances + depenses), venteExiste,
-    numeroVente: v ? v.NumVentes : null, venteCredit, ecartCredit: venteCredit - creances };
+  const sommes = totalVente + creditsPayes - (creances + depenses);
+  return { caisseHier, dateHier, totalVente, benefice: v ? Number(v.benefice) : 0, creditsPayes, creances, depenses, depensesAppro, sommes,
+    totalVerseJour: caisseHier + sommes, venteExiste, numeroVente: v ? v.NumVentes : null, venteCredit, ecartCredit: venteCredit - creances };
 }
 
 router.get('/caisse', h(async (req, res) => {
@@ -89,9 +94,10 @@ router.post('/caisse', h(async (req, res) => {
     if (avant) throw fail(`La caisse de la vente ${avant.NumVentes} du ${avant.DateVente.split('-').reverse().join('/')} doit être fermée d'abord.`);
     await c.query(
       `INSERT INTO "VERSEMENTINTERNE"("AGENTS","SOMMES","MTDEPENSES","MTVERSER","DATEVERSE","HEUREVERSE","MOISVERSE","ANNEEVERSE","MTJRCTN","ECART",
-        "CREANCES","FONDSDECAISSEHIER","FermeCaisse","DATEENREG","CREDITSPAYES","WAVE","OM","ESPECE") VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13,$14,$15,$16,$17)`,
+        "CREANCES","FONDSDECAISSEHIER","FermeCaisse","DATEENREG","CREDITSPAYES","WAVE","OM","ESPECE","BENEFICE","TOTALVERSEJOUR")
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13,$14,$15,$16,$17,$18,$19)`,
       [req.user.nom, s.sommes, s.depenses, verse, date, nowTime(), moisDe(date), anneeDe(date), s.totalVente, s.sommes - verse,
-        s.creances, s.caisseHier, today(), s.creditsPayes, wave, om, espece]
+        s.creances, s.caisseHier, today(), s.creditsPayes, wave, om, espece, s.benefice, s.totalVerseJour]
     );
     // La répartition est aussi reportée sur la vente du jour (bilans / statistiques)
     await c.query(`UPDATE "T_Ventes" SET "Fermer"=true, "WAVE"=$2, "OM"=$3, "ESPECE"=$4, "CREDIT"=$5 WHERE "DateVente"=$1`, [date, wave, om, espece, s.creances]);
@@ -102,7 +108,8 @@ router.post('/caisse', h(async (req, res) => {
 
 router.get('/caisse/bilan', h(async (req, res) => {
   const r = await q(`SELECT rid id, "DATEENREG", "DATEVERSE", "MTJRCTN", "MTDEPENSES", "CREANCES", COALESCE("CREDITSPAYES",0) "CREDITSPAYES",
-      "FONDSDECAISSEHIER", "SOMMES", "MTVERSER", COALESCE("WAVE",0) "WAVE", COALESCE("OM",0) "OM", COALESCE("ESPECE",0) "ESPECE", "ECART", "HEUREVERSE", "AGENTS"
+      "FONDSDECAISSEHIER", "SOMMES", "MTVERSER", COALESCE("BENEFICE",0) "BENEFICE",
+      COALESCE(NULLIF("TOTALVERSEJOUR",0), COALESCE("FONDSDECAISSEHIER",0)+COALESCE("SOMMES",0)) "TOTALVERSEJOUR", COALESCE("WAVE",0) "WAVE", COALESCE("OM",0) "OM", COALESCE("ESPECE",0) "ESPECE", "ECART", "HEUREVERSE", "AGENTS"
     FROM "VERSEMENTINTERNE" WHERE "DATEVERSE" BETWEEN $1 AND $2 ORDER BY "DATEVERSE" DESC`,
   [req.query.du || '1900-01-01', req.query.au || '2999-12-31']);
   res.json(r.rows);

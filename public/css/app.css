@@ -568,3 +568,14 @@ button.app-card .app-go { margin-top: auto; }
 .acc-item b { display: block; font-size: 14px; }
 .acc-item small { display: block; color: var(--ink2); font-size: 12px; }
 .tk-acc td { font-size: 12px; color: #333; }
+
+/* v9 : fermeture (versé d'hier, bénéfice, total versé ce jour) + inventaire */
+.a-verser.total-jour { background: linear-gradient(135deg, var(--g800), var(--g600)); }
+.a-verser span small { display: block; font-weight: 500; font-size: 11px; opacity: .85; letter-spacing: 0; }
+.kv.benef small { color: #1b7a2e; }
+.inv-in { width: 96px; height: 36px; text-align: right; font-weight: 700; margin-left: auto; }
+@media print { #i-tabs, .toolbar .btn { display: none !important; } }
+.kpi.wide b, .kpi.wide small, .kpi.wide span { white-space: normal; overflow: visible; text-overflow: clip; }
+.kpi.wide b { font-size: 17px; line-height: 1.2; }
+@media (max-width: 699px) { .tbl .hide-m { display: none; } .inv-in { width: 64px; } }
+.kv b { white-space: nowrap; }

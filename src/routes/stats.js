@@ -47,10 +47,23 @@ router.get('/stats', h(async (req, res) => {
     (SELECT COALESCE(SUM(montantcreance),0) FROM "creancier" WHERE datecreance BETWEEN $1 AND $2) credits,
     (SELECT COALESCE(SUM(payer),0) FROM "paiement" WHERE datepaiement BETWEEN $1 AND $2) payes,
     (SELECT COALESCE(SUM("totalFour"),0) FROM "appro" WHERE dateappro BETWEEN $1 AND $2) appro,
-    (SELECT COALESCE(SUM("MONTANT"),0) FROM "DEPENSEQUOTIDIEN" WHERE "DATEDEP" BETWEEN $1 AND $2) depenses`, P)).rows[0];
+    (SELECT COALESCE(SUM("MONTANT"),0) FROM "DEPENSEQUOTIDIEN" WHERE "DATEDEP" BETWEEN $1 AND $2) depenses,
+    (SELECT COALESCE(SUM("MONTANT"),0) FROM "DEPENSEQUOTIDIEN" WHERE "DATEDEP" BETWEEN $1 AND $2 AND "NUMAPPRO" IS NULL) "depensesHorsAppro"`, P)).rows[0];
 
   const n = (o) => Object.fromEntries(Object.entries(o).map(([k, v]) => [k, Number(v) || 0]));
   res.json({ du, au, jours, mois, top, paiements: n(pay), depTypes, autres: n(autres) });
+}));
+
+// Bilan des ventes par produit (classement du plus vendu au moins vendu)
+router.get('/bilans/produits', h(async (req, res) => {
+  const au = isDate(req.query.au) ? req.query.au : today();
+  const du = isDate(req.query.du) ? req.query.du : au.slice(0, 8) + '01';
+  const rows = (await q(`SELECT UPPER(TRIM(libelle)) produit, SUM("StockVendu") qte, SUM("TotalPV") ventes, SUM("TotalAchat") achat,
+      SUM("Benefice") benefice, COUNT(DISTINCT "DateInventaire") FILTER (WHERE "StockVendu">0) jours, MAX("PrixUnitaire") pu
+    FROM "T_Inventaire" WHERE "DateInventaire" BETWEEN $1 AND $2 GROUP BY 1 ORDER BY 2 DESC, 3 DESC`, [du, au])).rows
+    .map((r) => ({ produit: r.produit, qte: +r.qte || 0, ventes: +r.ventes || 0, achat: +r.achat || 0, benefice: +r.benefice || 0, jours: +r.jours || 0, pu: +r.pu || 0 }));
+  const nbJours = +(await q(`SELECT COUNT(*) n FROM "T_Ventes" WHERE "DateVente" BETWEEN $1 AND $2`, [du, au])).rows[0].n;
+  res.json({ du, au, nbJours, produits: rows });
 }));
 
 // Tableau de bord de la page d'accueil

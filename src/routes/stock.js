@@ -5,6 +5,8 @@ const { admin, isAdmin, h, fail, num, today, nowTime, moisDe, anneeDe, isDate, n
 const SEL_PRODUIT = `SELECT rid, ref, "Lib", COALESCE(qte,0) qte, COALESCE(pu,0) pu, COALESCE("prixFour",0) "prixFour",
   code, typeemballage, COALESCE("PRIXEMBALLAGE",0) "PRIXEMBALLAGE" FROM "produit"`;
 
+const DEPENSE_APPRO = 'APPROVISIONNEMENT DE PRODUIT';
+
 async function recalcProduit(client, rid) {
   await client.query(`UPDATE "produit" SET total=ROUND(COALESCE(qte,0)*COALESCE(pu,0)), "totalFour"=ROUND(COALESCE(qte,0)*COALESCE("prixFour",0)) WHERE rid=$1`, [rid]);
 }
@@ -90,9 +92,14 @@ router.post('/appros', h(async (req, res) => {
       qteT += qte;
       totT += totalFour;
     }
+    // Le montant total de l'approvisionnement est enregistré comme dépense du jour
+    if (totT > 0) {
+      await c.query(`INSERT INTO "DEPENSEQUOTIDIEN"("DEPENSE","MONTANT","DETAILS","AGENTS","DATEDEP","HEUREDEP","MOISDEP","ANNEEDEP","DATEENREG","NUMAPPRO")
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`, [DEPENSE_APPRO, totT, `Approvisionnement N° ${numero}`, req.user.nom, date, nowTime(), moisDe(date), anneeDe(date), today(), numero]);
+    }
     const v = (await c.query(`SELECT "NumVentes", "DateVente" FROM "T_Ventes" WHERE "DateVente" >= $1 AND COALESCE("Fermer",false)=false ORDER BY "DateVente" LIMIT 1`, [date])).rows[0];
     const avertissement = v ? `La vente ${v.NumVentes} du ${v.DateVente.split('-').reverse().join('/')} est déjà saisie : ouvrez-la dans Ventes et validez-la à nouveau (modification) pour qu'elle prenne en compte cet approvisionnement.` : null;
-    return { numero, qte: qteT, total: totT, avertissement };
+    return { numero, qte: qteT, total: totT, depense: totT, avertissement };
   });
   res.json(out);
 }));
@@ -121,6 +128,7 @@ router.delete('/appros', admin, h(async (req, res) => {
   await tx(async (c) => {
     const rows = (await c.query(`SELECT * FROM "appro" WHERE "IDapproAB"=$1 AND dateappro=$2 FOR UPDATE`, [numero, date])).rows;
     if (!rows.length) throw fail('Approvisionnement introuvable.', 404);
+    if (req.user.role !== 'superadmin') await verifierJourOuvert(c, date, 'ou supprimer un approvisionnement');
     if (rows.some((r) => r.NumVente)) {
       throw fail(`Cet approvisionnement est déjà pris en compte dans la vente ${rows.find((r) => r.NumVente).NumVente}. Supprimez d'abord la vente.`);
     }
@@ -132,10 +140,90 @@ router.delete('/appros', admin, h(async (req, res) => {
       }
     }
     await c.query(`DELETE FROM "appro" WHERE "IDapproAB"=$1 AND dateappro=$2`, [numero, date]);
+    await c.query(`DELETE FROM "DEPENSEQUOTIDIEN" WHERE "NUMAPPRO"=$1 AND "DATEDEP"=$2`, [numero, date]);
   });
+  res.json({ ok: true });
+}));
+
+// ---------- INVENTAIRE PHYSIQUE (comme GESTION MRPA) ----------
+// Pour chaque boisson : stock du dernier inventaire + appro de la période = stock de départ ;
+// stock actuel du logiciel comparé à la quantité physique comptée -> écart.
+async function lignesInventaire(c, di, au) {
+  const prods = (await c.query(`${SEL_PRODUIT} ORDER BY "Lib"`)).rows;
+  const derniers = (await c.query(`SELECT DISTINCT ON (COALESCE(ref, UPPER(TRIM(lib)))) ref, UPPER(TRIM(lib)) lib, qte_juste, date_inv
+    FROM "inventaire_maquis" ORDER BY COALESCE(ref, UPPER(TRIM(lib))), date_inv DESC, id DESC`)).rows;
+  const ap = (await c.query(`SELECT ref, UPPER(TRIM("Lib")) lib, SUM(qte) qte FROM "appro" WHERE dateappro BETWEEN $1 AND $2 GROUP BY 1, 2`, [di, au])).rows;
+  return prods.map((p) => {
+    const L = String(p.Lib).trim().toUpperCase();
+    const d = derniers.find((x) => (x.ref && x.ref === p.ref)) || derniers.find((x) => x.lib === L);
+    const appro = ap.filter((x) => (x.ref && x.ref === p.ref) || x.lib === L).reduce((t, x) => t + (Number(x.qte) || 0), 0);
+    const prev = d ? Number(d.qte_juste) || 0 : 0;
+    return { rid: p.rid, ref: p.ref, Lib: p.Lib, dernier: prev, dateDernier: d ? d.date_inv : null, appro, depart: prev + appro,
+      logiciel: Number(p.qte) || 0, prixFour: p.prixFour, pu: p.pu };
+  });
+}
+
+router.get('/inventaire/preparer', h(async (req, res) => {
+  const last = (await q(`SELECT MAX(date_inv) d FROM "inventaire_maquis"`)).rows[0].d;
+  const di = isDate(req.query.di) ? req.query.di : (last || today().slice(0, 8) + '01');
+  const au = isDate(req.query.au) ? req.query.au : today();
+  res.json({ di, au, dernier: last, lignes: await lignesInventaire({ query: q }, di, au) });
+}));
+
+router.post('/inventaire', h(async (req, res) => {
+  const b = req.body || {};
+  const di = isDate(b.di) ? b.di : today(), au = isDate(b.au) ? b.au : today();
+  const ajuster = !!b.ajuster;
+  if (ajuster && !isAdmin(req.user)) throw fail("Seul l'administrateur peut ajuster le stock du logiciel.", 403);
+  const saisies = (b.lignes || []).filter((l) => l.physique !== '' && l.physique !== null && l.physique !== undefined);
+  if (!saisies.length) throw fail('Saisissez la quantité physique d\'au moins une boisson.');
+  const out = await tx(async (c) => {
+    const lignes = await lignesInventaire(c, di, au);
+    const d = today(), hr = nowTime();
+    const numInv = 'INV' + d.replace(/-/g, '').slice(2) + '-' + hr.replace(/:/g, '');
+    let nb = 0, ecartValeur = 0;
+    for (const s of saisies) {
+      const l = lignes.find((x) => x.rid === Number(s.rid));
+      if (!l) continue;
+      const ph = num(s.physique);
+      if (ph < 0) throw fail(`Quantité physique invalide pour ${l.Lib}.`);
+      const ecart = Math.round((l.logiciel - ph) * 1000) / 1000;
+      const ve = Math.round(ecart * l.prixFour);
+      ecartValeur += ve;
+      await c.query(`INSERT INTO "inventaire_maquis"(num_inv,date_inv,heure,ref,lib,qte_dernier_inv,qte_appro,qte_depart,qte_logiciel,qte_physique,qte_ecart,qte_juste,
+          prix_achat,prix_vente,valeur_ecart,date_debut,date_fin,ajuste,utilisateur) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
+      [numInv, d, hr, l.ref, l.Lib, l.dernier, l.appro, l.depart, l.logiciel, ph, ecart, ph, l.prixFour, l.pu, ve, di, au, ajuster, req.user.nom]);
+      if (ajuster) {
+        await c.query(`UPDATE "produit" SET qte=$1 WHERE rid=$2`, [ph, l.rid]);
+        await recalcProduit(c, l.rid);
+      }
+      nb++;
+    }
+    return { numero: numInv, nb, ajuste: ajuster, ecartValeur };
+  });
+  res.json(out);
+}));
+
+router.get('/inventaire/liste', h(async (req, res) => {
+  const r = await q(`SELECT num_inv, date_inv, MIN(heure) heure, COUNT(*) nb, SUM(ABS(qte_ecart)) ecarts, SUM(valeur_ecart) valeur_ecart,
+      BOOL_OR(ajuste) ajuste, MIN(date_debut) date_debut, MAX(date_fin) date_fin, MAX(utilisateur) utilisateur
+    FROM "inventaire_maquis" GROUP BY num_inv, date_inv ORDER BY date_inv DESC, MIN(id) DESC`);
+  res.json(r.rows.map((x) => ({ ...x, nb: +x.nb, ecarts: +x.ecarts, valeur_ecart: +x.valeur_ecart })));
+}));
+
+router.get('/inventaire/detail', h(async (req, res) => {
+  const r = await q(`SELECT * FROM "inventaire_maquis" WHERE num_inv=$1 ORDER BY lib`, [req.query.numero]);
+  res.json(r.rows);
+}));
+
+router.delete('/inventaire', admin, h(async (req, res) => {
+  const r = await q(`SELECT BOOL_OR(ajuste) a FROM "inventaire_maquis" WHERE num_inv=$1`, [req.query.numero]);
+  if (r.rows[0].a && req.user.role !== 'superadmin') throw fail('Cet inventaire a ajusté le stock : seul le super administrateur peut le supprimer (le stock ne sera pas remis comme avant).');
+  await q(`DELETE FROM "inventaire_maquis" WHERE num_inv=$1`, [req.query.numero]);
   res.json({ ok: true });
 }));
 
 module.exports = router;
 module.exports.recalcProduit = recalcProduit;
 module.exports.SEL_PRODUIT = SEL_PRODUIT;
+module.exports.DEPENSE_APPRO = DEPENSE_APPRO;

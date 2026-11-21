@@ -20,7 +20,9 @@ const Pages = {};
     { r: '/creances', t: 'Créances', i: 'card', c: 'c4' },
     { r: '/depenses', t: 'Dépenses Quotidiennes', i: 'wallet', c: 'c5' },
     { r: '/caisse', t: 'Fermeture de caisse', i: 'power', c: 'c6' },
+    { r: '/inventaire', t: 'Inventaire', i: 'list', c: 'c9' },
     { r: '/bilans/ventes', t: 'Bilans des Ventes', i: 'chart', c: 'c7' },
+    { r: '/bilans/produits', t: 'Bilan par produit', i: 'box', c: 'c1' },
     { r: '/bilans/appros', t: 'Bilans Approvisions', i: 'pie', c: 'c8' },
     { r: '/bilans/caisse', t: 'Bilans Fermeture de Caisse', i: 'report', c: 'c10' },
   ];
@@ -487,10 +489,10 @@ const Pages = {};
         const items = lignes.filter((l) => l.qte > 0);
         if (!items.length) return err('Ajoutez au moins une boisson avec une quantité.');
         const date = $('#a-date').value;
-        if (!(await confirm(`Valider l'approvisionnement du <b>${dfr(date)}</b> ?<br>${items.length} boisson(s) · Quantité ${qty(sum(items, 'qte'))} · Total <b>${money(sum(items, (l) => l.qte * l.prixFour))}</b>`))) return;
+        if (!(await confirm(`Valider l'approvisionnement du <b>${dfr(date)}</b> ?<br>${items.length} boisson(s) · Quantité ${qty(sum(items, 'qte'))} · Total <b>${money(sum(items, (l) => l.qte * l.prixFour))}</b><br><br><span class="muted">Ce montant sera enregistré dans les dépenses du jour (motif : APPROVISIONNEMENT DE PRODUIT).</span>`))) return;
         try {
           const r = await post('/appros', { date, lignes: items.map((l) => ({ rid: l.rid, qte: l.qte })) });
-          ok(`Approvisionnement ${r.numero} enregistré avec succès.`);
+          ok(`Approvisionnement ${r.numero} enregistré avec succès.${r.depense ? ` Dépense « APPROVISIONNEMENT DE PRODUIT » de ${money(r.depense)} ajoutée au ${dfr(date)}.` : ''}`);
           lignes = []; produits = await get('/produits'); draw();
           await new Promise((res) => setTimeout(res, 900));
           if (r.avertissement) await alert(esc(r.avertissement), 'Vente déjà saisie');
@@ -703,7 +705,7 @@ const Pages = {};
         if ($('[name=nom]').value) p.set('nom', $('[name=nom]').value);
         const rows = await get('/paiements?' + p);
         t = table($('#h-tbl'), [{ t: 'Nom créancier', f: (r) => `<b>${esc(r.client)}</b>`, cls: 'wrap' }, { t: 'Montant', r: 1, f: (r) => money(r.payer) }, { t: 'Date', f: (r) => dfr(r.datepaiement) }],
-          rows, { green: 1, selectable: true, onSelect: () => { if ($('#h-del')) $('#h-del').disabled = false; }, empty: 'Aucun paiement sur la période.' });
+          rows, { green: 1, selectable: true, onSelect: (r) => { if ($('#h-del')) $('#h-del').disabled = !!r.NUMAPPRO; }, empty: 'Aucun paiement sur la période.' });
         $('#h-tot').textContent = money(sum(rows, 'payer'));
         if ($('#h-del')) $('#h-del').disabled = true;
       };
@@ -772,7 +774,7 @@ const Pages = {};
         if ($('[name=type]').value) p.set('depense', $('[name=type]').value);
         const rows = await get('/depenses?' + p);
         t = table($('#h-tbl'), [
-          { t: 'Date', f: (r) => dfr(r.DATEDEP) }, { t: 'Heure', f: (r) => hm(r.HEUREDEP) }, { t: 'Dépense', f: (r) => `<b>${esc(r.DEPENSE)}</b>` },
+          { t: 'Date', f: (r) => dfr(r.DATEDEP) }, { t: 'Heure', f: (r) => hm(r.HEUREDEP) }, { t: 'Dépense', f: (r) => `<b>${esc(r.DEPENSE)}</b>${r.NUMAPPRO ? ' <span class="badge">auto</span>' : ''}` },
           { t: 'Montant', r: 1, f: (r) => `<b>${money(r.MONTANT)}</b>` }, { t: 'Motif', f: (r) => esc(r.DETAILS || ''), cls: 'wrap' }, { t: 'Agent', f: (r) => esc(r.AGENTS || '') },
         ], rows, { green: 1, selectable: true, onSelect: () => { if ($('#h-del')) $('#h-del').disabled = false; }, empty: 'Aucune dépense sur la période.' });
         $('#h-tot').textContent = money(sum(rows, 'MONTANT'));
@@ -816,33 +818,36 @@ const Pages = {};
         const line = (lbl, v, color, signe = '') => `<div class="kv"><span style="font-weight:700;font-size:12.5px;color:${color}">${signe ? `<span class="sg">${signe}</span>` : ''}${lbl}</span><span class="val" style="background:#fff;border:1px solid var(--line);color:${color}">${money(v)}</span></div>`;
         const q = `date=${date}`;
         const pretes = s.venteExiste;
-        const V = f ? { hier: f.FONDSDECAISSEHIER, vente: f.MTJRCTN, payes: f.CREDITSPAYES, creances: f.CREANCES, dep: f.MTDEPENSES, aVerser: f.SOMMES } :
-          { hier: s.caisseHier, vente: s.totalVente, payes: s.creditsPayes, creances: s.creances, dep: s.depenses, aVerser: s.sommes };
+        const V = f ? { hier: n(f.FONDSDECAISSEHIER), vente: f.MTJRCTN, payes: f.CREDITSPAYES, creances: f.CREANCES, dep: f.MTDEPENSES, aVerser: n(f.SOMMES), benef: n(f.BENEFICE) || s.benefice } :
+          { hier: s.caisseHier, vente: s.totalVente, payes: s.creditsPayes, creances: s.creances, dep: s.depenses, aVerser: s.sommes, benef: s.benefice };
+        V.totalJour = f && n(f.TOTALVERSEJOUR) ? n(f.TOTALVERSEJOUR) : V.hier + V.aVerser;
         $('#k-body').innerHTML = `
           ${f ? `<div class="notice ok">${ic('lock')}<div>Caisse fermée le ${dfr(f.DATEENREG)} à ${hm(f.HEUREVERSE)} par ${esc(f.AGENTS || '')}.</div></div>` : `
           <div class="card-title" style="margin-top:4px">${ic('list')} Avant de fermer la caisse, enregistrez :</div>
           <div class="steps">
-            ${etape(null, "1. L'approvisionnement (s'il y en a eu)", s.appro.n ? `${s.appro.n} approvisionnement(s) ce jour · ${money(s.appro.total)}` : 'Aucun approvisionnement ce jour', `/appro?${q}`, 'Appro')}
+            ${etape(null, "1. L'approvisionnement (s'il y en a eu)", s.appro.n ? `${s.appro.n} approvisionnement(s) ce jour · ${money(s.appro.total)} (compté dans les dépenses)` : 'Aucun approvisionnement ce jour', `/appro?${q}`, 'Appro')}
             ${etape(s.venteExiste, '2. La vente de la journée', s.venteExiste ? `Vente ${esc(s.numeroVente)} · ${money(s.totalVente)}` : 'Obligatoire : aucune vente enregistrée pour ce jour', `/ventes?${q}`, s.venteExiste ? 'Voir / modifier' : 'Saisir')}
-            ${etape(null, "3. Les dépenses (s'il y en a)", s.nbDepenses ? `${s.nbDepenses} dépense(s) · ${money(s.depenses)}` : 'Aucune dépense ce jour', `/depenses?${q}`, 'Dépenses')}
+            ${etape(null, "3. Les dépenses (s'il y en a)", s.nbDepenses ? `${s.nbDepenses} dépense(s) · ${money(s.depenses)}${s.depensesAppro ? ` dont appro ${money(s.depensesAppro)}` : ''}` : 'Aucune dépense ce jour', `/depenses?${q}`, 'Dépenses')}
             ${etape(null, "4. Les créances (s'il y en a)", s.creances ? `Créances du jour : ${money(s.creances)}` : 'Aucune créance ce jour', `/creances/credit?${q}`, 'Créances')}
           </div>`}
           <div class="card-title" style="margin-top:6px">${ic('report')} Situation de la journée</div>
-          ${line('MONTANT DU DERNIER VERSEMENT', V.hier, '#888')}
+          ${line(`VERSEMENT D'HIER${!f && s.dateHier ? ` (${dfr(s.dateHier)})` : ''}`, V.hier, '#555')}
           ${line('MONTANT TOTAL VENTE DU JOUR', V.vente, '#7b1fe0', '+')}
+          <div class="kv benef"><span style="font-weight:700;font-size:12.5px;color:#1b7a2e">BÉNÉFICE DU JOUR <small style="font-weight:500">(sur la vente totale)</small></span><span class="val" style="background:#eaf7ec;border:1px solid #b9e2c0;color:#1b7a2e">${money(V.benef)}</span></div>
           ${V.payes ? line('CRÉDITS PAYÉS CE JOUR', V.payes, '#7b1fe0', '+') : ''}
           ${line('TOTAL CRÉANCES', V.creances, '#c62828', '−')}
           ${line('TOTAL DÉPENSES', V.dep, '#0f8a8a', '−')}
           <div class="a-verser"><span>MONTANT TOTAL À VERSER AUJOURD'HUI</span><b>${money(V.aVerser)}</b></div>
+          <div class="a-verser total-jour"><span>MONTANT TOTAL VERSÉ CE JOUR <small>(versement d'hier + à verser aujourd'hui)</small></span><b>${money(V.totalJour)}</b></div>
 
-          <div class="card-title" style="margin-top:14px">${ic('wallet')} Répartition du versement</div>
+          <div class="card-title" style="margin-top:14px">${ic('wallet')} Répartition du montant à verser aujourd'hui</div>
           <div class="repartition rep3">
             <div class="field"><label>Wave</label>${f ? `<span class="val">${money(f.WAVE)}</span>` : `<input class="input" id="k-wave" ${pretes ? '' : 'disabled'}>`}</div>
             <div class="field"><label>Orange Money (OM)</label>${f ? `<span class="val">${money(f.OM)}</span>` : `<input class="input" id="k-om" ${pretes ? '' : 'disabled'}>`}</div>
             <div class="field"><label>Espèce</label>${f ? `<span class="val">${money(f.ESPECE)}</span>` : `<input class="input" id="k-espece" ${pretes ? '' : 'disabled'}>`}</div>
           </div>
           ${f ? '' : `<div class="row" style="justify-content:flex-end;margin:-4px 0 8px"><button class="btn sec sm" id="k-auto" ${pretes ? '' : 'disabled'}>${ic('wallet')} Reste en espèces</button></div>`}
-          <div class="kv"><span style="font-weight:700">TOTAL VERSÉ</span><b id="k-verse">${money(f ? f.MTVERSER : 0)}</b></div>
+          <div class="kv"><span style="font-weight:700">TOTAL RÉPARTI (Wave + OM + Espèce)</span><b id="k-verse">${money(f ? f.MTVERSER : 0)}</b></div>
           <div class="ecart" id="k-ecart"></div>
           ${!f && !pretes ? `<div class="notice err" style="margin-top:12px">${ic('warn')}<div>La vente de cette journée doit être enregistrée avant la fermeture.</div></div>` : ''}
           <div class="btn-bar">${f ? (adminOnly() ? `<button class="btn red" id="k-reo">${ic('refresh')} Rouvrir la caisse</button>` : '')
@@ -864,7 +869,7 @@ const Pages = {};
           $('#k-act').addEventListener('click', () => load().catch(err));
           $('#k-val').addEventListener('click', async () => {
             const d = V.aVerser - tot();
-            if (!(await confirm(`Voulez-vous fermer la caisse du <b>${dfr(date)}</b> ?<br><br>Montant à verser : <b>${money(V.aVerser)}</b><br>Wave : <b>${money(R.wave)}</b> · OM : <b>${money(R.om)}</b> · Espèce : <b>${money(R.espece)}</b><br>Total versé : <b>${money(tot())}</b>
+            if (!(await confirm(`Voulez-vous fermer la caisse du <b>${dfr(date)}</b> ?<br><br>Versement d'hier : <b>${money(V.hier)}</b><br>Montant à verser aujourd'hui : <b>${money(V.aVerser)}</b><br>Montant total versé ce jour : <b>${money(V.totalJour)}</b><br>Bénéfice du jour : <b>${money(V.benef)}</b><br><br>Wave : <b>${money(R.wave)}</b> · OM : <b>${money(R.om)}</b> · Espèce : <b>${money(R.espece)}</b><br>Total réparti : <b>${money(tot())}</b>
               ${d ? `<br><span style="color:var(--red);font-weight:700">Écart de ${money(Math.abs(d))} (${d > 0 ? 'manquant' : 'excédent'})</span>` : ''}<br><br><span class="muted">Après la fermeture, la vente, les dépenses et les créances de ce jour ne pourront plus être modifiées.</span>`))) return;
             try { await post('/caisse', { date, ...R }); ok('Caisse fermée avec succès.'); load(); } catch (x) { err(x); }
           });
@@ -1029,7 +1034,7 @@ const Pages = {};
         const kpi = (lbl, val, sub, icn, cls) => `<div class="kpi"><div class="kpi-ic ${cls}">${ic(icn)}</div><div><small>${lbl}</small><b>${val}</b><span>${sub}</span></div></div>`;
         $('#st-kpi').innerHTML = kpi('Chiffre d\'affaires', money(p.ventes), `${p.nb} jour(s) de vente`, 'cart', 'c1')
           + kpi('Bénéfice', money(p.benefice), p.ventes ? `Marge ${Math.round((p.benefice / p.ventes) * 100)} %` : '—', 'chart', 'c4')
-          + kpi('Dépenses', money(d.autres.depenses), `Bénéfice net ${money(p.benefice - d.autres.depenses)}`, 'wallet', 'c5')
+          + kpi('Dépenses', money(d.autres.depenses), `Bénéfice net ${money(p.benefice - d.autres.depensesHorsAppro)} (hors appro)`, 'wallet', 'c5')
           + kpi('Approvisionnements', money(d.autres.appro), `Crédits ${money(d.autres.credits)} · payés ${money(d.autres.payes)}`, 'truck', 'c3');
         const lab = d.jours.map((x) => x.d.slice(8, 10) + '/' + x.d.slice(5, 7));
         Charts.combo($('#st-jour'), lab, [
@@ -1077,13 +1082,13 @@ const Pages = {};
         table($('#bc-tbl'), [
           { t: 'Date Enreg', f: (r) => dfr(r.DATEENREG) }, { t: 'Date versé', f: (r) => `<b>${dfr(r.DATEVERSE)}</b>`, first: 1 },
           { t: 'Vente jour', r: 1, f: (r) => money(r.MTJRCTN) }, { t: 'Dépense', r: 1, f: (r) => money(r.MTDEPENSES) }, { t: 'Créances', r: 1, f: (r) => money(r.CREANCES) },
-          { t: 'Crédits payés', r: 1, f: (r) => money(r.CREDITSPAYES) }, { t: 'Dernier versement', r: 1, f: (r) => money(r.FONDSDECAISSEHIER) },
-          { t: 'À verser', r: 1, f: (r) => money(r.SOMMES) }, { t: 'Wave', r: 1, f: (r) => money(r.WAVE) }, { t: 'OM', r: 1, f: (r) => money(r.OM) }, { t: 'Espèce', r: 1, f: (r) => money(r.ESPECE) },
-          { t: 'Montant Versé', r: 1, f: (r) => `<b>${money(r.MTVERSER)}</b>` },
+          { t: 'Crédits payés', r: 1, f: (r) => money(r.CREDITSPAYES) }, { t: 'Bénéfice', r: 1, f: (r) => money(r.BENEFICE) }, { t: "Versé d'hier", r: 1, f: (r) => money(r.FONDSDECAISSEHIER) },
+          { t: 'À verser', r: 1, f: (r) => money(r.SOMMES) }, { t: 'Total versé ce jour', r: 1, f: (r) => `<b>${money(r.TOTALVERSEJOUR)}</b>` }, { t: 'Wave', r: 1, f: (r) => money(r.WAVE) }, { t: 'OM', r: 1, f: (r) => money(r.OM) }, { t: 'Espèce', r: 1, f: (r) => money(r.ESPECE) },
+          { t: 'Total réparti', r: 1, f: (r) => money(r.MTVERSER) },
           { t: 'Écart', r: 1, f: (r) => `<b style="color:${r.ECART ? 'var(--red)' : 'inherit'}">${money(r.ECART)}</b>` }, { t: 'Heure versé', f: (r) => hm(r.HEUREVERSE) },
         ], rows, { green: 1, empty: 'Aucune fermeture sur la période.',
-          foot: ['Total', '', money(sum(rows, 'MTJRCTN')), money(sum(rows, 'MTDEPENSES')), money(sum(rows, 'CREANCES')), money(sum(rows, 'CREDITSPAYES')), '', money(sum(rows, 'SOMMES')), money(sum(rows, 'WAVE')), money(sum(rows, 'OM')), money(sum(rows, 'ESPECE')), money(sum(rows, 'MTVERSER')), money(sum(rows, 'ECART')), ''] });
-        $('#bc-tot').innerHTML = `<div class="stat"><small>Total versé</small><b class="n">${money(sum(rows, 'MTVERSER'))}</b></div>
+          foot: ['Total', '', money(sum(rows, 'MTJRCTN')), money(sum(rows, 'MTDEPENSES')), money(sum(rows, 'CREANCES')), money(sum(rows, 'CREDITSPAYES')), money(sum(rows, 'BENEFICE')), '', money(sum(rows, 'SOMMES')), '', money(sum(rows, 'WAVE')), money(sum(rows, 'OM')), money(sum(rows, 'ESPECE')), money(sum(rows, 'MTVERSER')), money(sum(rows, 'ECART')), ''] });
+        $('#bc-tot').innerHTML = `<div class="stat"><small>Total à verser</small><b class="n">${money(sum(rows, 'SOMMES'))}</b></div><div class="stat"><small>Total bénéfice</small><b class="g">${money(sum(rows, 'BENEFICE'))}</b></div>
           <div class="stat"><small>Total ventes</small><b>${money(sum(rows, 'MTJRCTN'))}</b></div><div class="stat"><small>Total dépenses</small><b class="r">${money(sum(rows, 'MTDEPENSES'))}</b></div>
           <div class="stat"><small>Total écarts</small><b class="r">${money(sum(rows, 'ECART'))}</b></div>`;
       };
