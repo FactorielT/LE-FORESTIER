@@ -187,14 +187,17 @@ router.post('/inventaire', h(async (req, res) => {
       if (!l) continue;
       const ph = num(s.physique);
       if (ph < 0) throw fail(`Quantité physique invalide pour ${l.Lib}.`);
+      // Qté réelle : par défaut = quantité physique, mais modifiable
+      const reel = s.reelle === '' || s.reelle === null || s.reelle === undefined ? ph : num(s.reelle);
+      if (reel < 0) throw fail(`Quantité réelle invalide pour ${l.Lib}.`);
       const ecart = Math.round((l.logiciel - ph) * 1000) / 1000;
       const ve = Math.round(ecart * l.prixFour);
       ecartValeur += ve;
       await c.query(`INSERT INTO "inventaire_maquis"(num_inv,date_inv,heure,ref,lib,qte_dernier_inv,qte_appro,qte_depart,qte_logiciel,qte_physique,qte_ecart,qte_juste,
           prix_achat,prix_vente,valeur_ecart,date_debut,date_fin,ajuste,utilisateur) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)`,
-      [numInv, d, hr, l.ref, l.Lib, l.dernier, l.appro, l.depart, l.logiciel, ph, ecart, ph, l.prixFour, l.pu, ve, di, au, ajuster, req.user.nom]);
+      [numInv, d, hr, l.ref, l.Lib, l.dernier, l.appro, l.depart, l.logiciel, ph, ecart, reel, l.prixFour, l.pu, ve, di, au, ajuster, req.user.nom]);
       if (ajuster) {
-        await c.query(`UPDATE "produit" SET qte=$1 WHERE rid=$2`, [ph, l.rid]);
+        await c.query(`UPDATE "produit" SET qte=$1 WHERE rid=$2`, [reel, l.rid]);
         await recalcProduit(c, l.rid);
       }
       nb++;

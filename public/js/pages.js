@@ -853,6 +853,9 @@ const Pages = {};
           ${f ? '' : `<div class="row" style="justify-content:flex-end;margin:-4px 0 8px"><button class="btn sec sm" id="k-auto" ${pretes ? '' : 'disabled'}>${ic('wallet')} Reste en espèces</button></div>`}
           <div class="kv"><span style="font-weight:700">TOTAL RÉPARTI (Wave + OM + Espèce)</span><b id="k-verse">${money(f ? f.MTVERSER : 0)}</b></div>
           <div class="ecart" id="k-ecart"></div>
+          ${f ? (f.MOTIFECART ? `<div class="notice" style="margin-top:10px">${ic('edit')}<div><b>Motif de l'écart :</b> ${esc(f.MOTIFECART)}</div></div>` : '')
+            : `<div class="field motif-ecart hidden" id="k-motif-box" style="margin-top:10px"><label>Motif de l'écart * <span class="muted">(obligatoire, enregistré dans le journal des écarts)</span></label>
+              <textarea class="input" id="k-motif" maxlength="500" placeholder="Ex. : erreur de monnaie rendue, billet manquant, pourboire, transfert Wave non reçu…"></textarea></div>`}
           ${!f && !s.venteExiste ? `<div class="notice err" style="margin-top:12px">${ic('warn')}<div>La vente de cette journée doit être enregistrée avant la fermeture.</div></div>` : ''}
           ${avant ? `<div class="notice err" style="margin-top:12px">${ic('lock')}<div>La caisse de la vente <b>${esc(avant.NumVentes)}</b> du <b>${dfr(avant.DateVente)}</b> n'est pas encore fermée : fermez-la d'abord.
             <div style="margin-top:8px"><button class="btn red sm" id="k-avant">${ic('power')} Fermer la caisse du ${dfr(avant.DateVente)}</button></div></div></div>` : ''}
@@ -863,6 +866,7 @@ const Pages = {};
           const e = $('#k-ecart');
           e.className = 'ecart ' + (d === 0 ? 'ok' : 'ko');
           e.textContent = d === 0 ? '✓ Le versement correspond au montant à verser' : d > 0 ? `Écart : il manque ${money(d)}` : `Écart : excédent de ${money(-d)}`;
+          if ($('#k-motif-box')) $('#k-motif-box').classList.toggle('hidden', d === 0);
         };
         if (!f) {
           const R = { wave: 0, om: 0, espece: 0 };
@@ -876,9 +880,11 @@ const Pages = {};
           if ($('#k-avant')) $('#k-avant').addEventListener('click', () => { $('#k-date').value = avant.DateVente; load().catch(err); });
           $('#k-val').addEventListener('click', async () => {
             const d = V.aVerser - tot();
+            const motif = d ? ($('#k-motif').value || '').trim() : '';
+            if (d && motif.length < 3) { $('#k-motif').focus(); return err(`Il y a un écart de ${money(Math.abs(d))} (${d > 0 ? 'manquant' : 'excédent'}) : saisissez le motif de l'écart.`); }
             if (!(await confirm(`Voulez-vous fermer la caisse du <b>${dfr(date)}</b> ?<br><br>Versement d'hier : <b>${money(V.hier)}</b><br>Montant à verser aujourd'hui : <b>${money(V.aVerser)}</b><br>Montant total versé ce jour : <b>${money(V.totalJour)}</b><br>Bénéfice du jour : <b>${money(V.benef)}</b><br><br>Wave : <b>${money(R.wave)}</b> · OM : <b>${money(R.om)}</b> · Espèce : <b>${money(R.espece)}</b><br>Total réparti : <b>${money(tot())}</b>
-              ${d ? `<br><span style="color:var(--red);font-weight:700">Écart de ${money(Math.abs(d))} (${d > 0 ? 'manquant' : 'excédent'})</span>` : ''}<br><br><span class="muted">Après la fermeture, la vente, les dépenses et les créances de ce jour ne pourront plus être modifiées.</span>`))) return;
-            try { await post('/caisse', { date, ...R }); ok('Caisse fermée avec succès.'); load(); } catch (x) { err(x); }
+              ${d ? `<br><span style="color:var(--red);font-weight:700">Écart de ${money(Math.abs(d))} (${d > 0 ? 'manquant' : 'excédent'})</span><br>Motif : <i>${esc(motif)}</i>` : ''}<br><br><span class="muted">Après la fermeture, la vente, les dépenses et les créances de ce jour ne pourront plus être modifiées.</span>`))) return;
+            try { await post('/caisse', { date, ...R, motif }); ok('Caisse fermée avec succès.'); load(); } catch (x) { err(x); }
           });
         } else {
           majEcart(f.MTVERSER);
@@ -1083,7 +1089,8 @@ const Pages = {};
   Pages['/bilans/caisse'] = {
     title: 'Bilans Fermeture Caisse', back: '/',
     async render(el) {
-      el.innerHTML = `${periode(firstOfMonth(), today())}<div class="tbl-wrap" id="bc-tbl"></div><div class="stats" id="bc-tot" style="margin-top:14px"></div>`;
+      el.innerHTML = `${periode(firstOfMonth(), today())}<div class="tbl-wrap" id="bc-tbl"></div><div class="stats" id="bc-tot" style="margin-top:14px"></div>
+        <div class="section-h" style="margin-top:20px">Journal des écarts de caisse</div><div class="tbl-wrap" id="bc-jr"></div>`;
       const load = async () => {
         const rows = await get(`/caisse/bilan?du=${$('[name=du]').value}&au=${$('[name=au]').value}`);
         table($('#bc-tbl'), [
@@ -1092,9 +1099,18 @@ const Pages = {};
           { t: 'Crédits payés', r: 1, f: (r) => money(r.CREDITSPAYES) }, { t: 'Bénéfice', r: 1, f: (r) => money(r.BENEFICE) }, { t: "Versé d'hier", r: 1, f: (r) => money(r.FONDSDECAISSEHIER) },
           { t: 'À verser', r: 1, f: (r) => money(r.SOMMES) }, { t: 'Total versé ce jour', r: 1, f: (r) => `<b>${money(r.TOTALVERSEJOUR)}</b>` }, { t: 'Wave', r: 1, f: (r) => money(r.WAVE) }, { t: 'OM', r: 1, f: (r) => money(r.OM) }, { t: 'Espèce', r: 1, f: (r) => money(r.ESPECE) },
           { t: 'Total réparti', r: 1, f: (r) => money(r.MTVERSER) },
-          { t: 'Écart', r: 1, f: (r) => `<b style="color:${r.ECART ? 'var(--red)' : 'inherit'}">${money(r.ECART)}</b>` }, { t: 'Heure versé', f: (r) => hm(r.HEUREVERSE) },
+          { t: 'Écart', r: 1, f: (r) => `<b style="color:${r.ECART ? 'var(--red)' : 'inherit'}">${money(r.ECART)}</b>` }, { t: "Motif de l'écart", cls: 'wrap', f: (r) => esc(r.MOTIFECART || '') }, { t: 'Heure versé', f: (r) => hm(r.HEUREVERSE) },
         ], rows, { green: 1, empty: 'Aucune fermeture sur la période.',
-          foot: ['Total', '', money(sum(rows, 'MTJRCTN')), money(sum(rows, 'MTDEPENSES')), money(sum(rows, 'CREANCES')), money(sum(rows, 'CREDITSPAYES')), money(sum(rows, 'BENEFICE')), '', money(sum(rows, 'SOMMES')), '', money(sum(rows, 'WAVE')), money(sum(rows, 'OM')), money(sum(rows, 'ESPECE')), money(sum(rows, 'MTVERSER')), money(sum(rows, 'ECART')), ''] });
+          foot: ['Total', '', money(sum(rows, 'MTJRCTN')), money(sum(rows, 'MTDEPENSES')), money(sum(rows, 'CREANCES')), money(sum(rows, 'CREDITSPAYES')), money(sum(rows, 'BENEFICE')), '', money(sum(rows, 'SOMMES')), '', money(sum(rows, 'WAVE')), money(sum(rows, 'OM')), money(sum(rows, 'ESPECE')), money(sum(rows, 'MTVERSER')), money(sum(rows, 'ECART')), '', ''] });
+        const je = await get(`/caisse/ecarts?du=${$('[name=du]').value}&au=${$('[name=au]').value}`);
+        table($('#bc-jr'), [
+          { t: 'Date caisse', f: (r) => `<b>${dfr(r.date_caisse)}</b>`, first: 1 }, { t: 'À verser', r: 1, f: (r) => money(r.montant_a_verser) },
+          { t: 'Réparti', r: 1, f: (r) => money(r.total_reparti) }, { t: 'Écart', r: 1, f: (r) => `<b style="color:var(--red)">${money(r.ecart)}</b>` },
+          { t: 'Sens', f: (r) => (r.sens === 'MANQUANT' ? '<span class="badge red">Manquant</span>' : '<span class="badge amber">Excédent</span>') },
+          { t: 'Motif', cls: 'wrap', f: (r) => esc(r.motif || '') }, { t: 'Agent', f: (r) => esc(r.agent || '') },
+          { t: 'Enregistré le', f: (r) => `${dfr(r.date_enreg)} ${hm(r.heure_enreg)}` },
+          { t: 'Statut', f: (r) => (r.statut === 'VALIDE' ? '<span class="badge">Validé</span>' : `<span class="badge amber">${esc(r.statut)}</span>${r.annule_par ? `<br><small class="muted">par ${esc(r.annule_par)}</small>` : ''}`) },
+        ], je, { green: 1, empty: 'Aucun écart sur la période.' });
         $('#bc-tot').innerHTML = `<div class="stat"><small>Total à verser</small><b class="n">${money(sum(rows, 'SOMMES'))}</b></div><div class="stat"><small>Total bénéfice</small><b class="g">${money(sum(rows, 'BENEFICE'))}</b></div>
           <div class="stat"><small>Total ventes</small><b>${money(sum(rows, 'MTJRCTN'))}</b></div><div class="stat"><small>Total dépenses</small><b class="r">${money(sum(rows, 'MTDEPENSES'))}</b></div>
           <div class="stat"><small>Total écarts</small><b class="r">${money(sum(rows, 'ECART'))}</b></div>`;

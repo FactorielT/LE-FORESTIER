@@ -23,6 +23,7 @@
         loading(zone);
         const d = await get(`/inventaire/preparer${di ? `?di=${di}&au=${au}` : ''}`);
         const phys = {}; // rid -> quantité physique saisie
+        const reel = {}; // rid -> quantité réelle modifiée à la main (sinon = physique)
         zone.innerHTML = `<div class="card">
             <div class="toolbar" style="margin:0">
               <div class="field"><label>Date initiale</label><input class="input" type="date" id="i-di" value="${d.di}"></div>
@@ -37,7 +38,7 @@
           <div class="stats" id="i-tot" style="margin-top:12px"></div>
           <div class="card" style="margin-top:12px"><div class="row" style="align-items:center;justify-content:space-between;gap:12px">
             <label class="chk" style="display:flex;gap:8px;align-items:center;font-weight:600"><input type="checkbox" id="i-aj" ${adminOnly() ? 'checked' : 'disabled'}>
-              Ajuster le stock du logiciel à la quantité physique${adminOnly() ? '' : ' <span class="muted">(administrateur)</span>'}</label>
+              Ajuster le stock du logiciel à la quantité réelle${adminOnly() ? '' : ' <span class="muted">(administrateur)</span>'}</label>
             <button class="btn lg" id="i-val">${ic('check')} Valider l'inventaire</button></div></div>`;
         const lignes = d.lignes;
         const majTot = () => {
@@ -59,15 +60,17 @@
             { t: 'Stock logiciel', r: 1, f: (l) => `<b>${fq(l.logiciel)}</b>` },
             { t: 'Qté physique', r: 1, f: (l) => `<input class="input inv-in" inputmode="decimal" data-rid="${l.rid}" value="${phys[l.rid] ?? ''}" placeholder="—">` },
             { t: 'Écart stock', r: 1, f: (l) => `<span class="i-ec" data-rid="${l.rid}"></span>` },
-            { t: 'Qté réelle', r: 1, hm: 1, f: (l) => `<span class="i-re" data-rid="${l.rid}"></span>` },
+            { t: 'Qté réelle', r: 1, f: (l) => `<input class="input inv-re" inputmode="decimal" data-rid="${l.rid}" value="${reel[l.rid] ?? phys[l.rid] ?? ''}" placeholder="—" title="Par défaut = quantité physique, modifiable">` },
           ], rows, { green: 1, empty: 'Aucune boisson dans le stock.' });
           const majLigne = (rid) => {
             const l = lignes.find((x) => x.rid === rid);
-            const e = $(`.i-ec[data-rid="${rid}"]`), r = $(`.i-re[data-rid="${rid}"]`);
-            if (phys[rid] === undefined) { e.textContent = '—'; r.textContent = '—'; e.style.color = ''; return; }
+            const e = $(`.i-ec[data-rid="${rid}"]`), r = $(`.inv-re[data-rid="${rid}"]`);
+            // Tant qu'elle n'a pas été modifiée à la main, la Qté réelle suit la Qté physique
+            if (reel[rid] === undefined) r.value = phys[rid] === undefined ? '' : String(phys[rid]);
+            r.classList.toggle('modif', reel[rid] !== undefined && reel[rid] !== phys[rid]);
+            if (phys[rid] === undefined) { e.textContent = '—'; e.style.color = ''; return; }
             const ec = l.logiciel - phys[rid];
             e.textContent = fq(ec); e.style.color = ec ? 'var(--red)' : 'var(--g700)'; e.style.fontWeight = '700';
-            r.textContent = fq(phys[rid]);
           };
           $$('.inv-in', $('#i-tbl')).forEach((inp) => {
             const rid = Number(inp.dataset.rid);
@@ -84,6 +87,14 @@
               if (all[i + 1]) all[i + 1].focus();
             });
           });
+          $$('.inv-re', $('#i-tbl')).forEach((inp) => {
+            const rid = Number(inp.dataset.rid);
+            inp.addEventListener('input', () => {
+              const v = inp.value.trim();
+              if (v === '') delete reel[rid]; else reel[rid] = Math.max(0, n(v));
+              majLigne(rid);
+            });
+          });
         };
         $('#i-q').addEventListener('input', drawTbl);
         $('#i-aff').addEventListener('click', () => saisie($('#i-di').value, $('#i-au').value).catch(err));
@@ -93,9 +104,10 @@
           if (!s.length) return err("Saisissez la quantité physique d'au moins une boisson.");
           const aj = $('#i-aj').checked;
           const ecarts = s.filter((l) => l.logiciel !== phys[l.rid]).length;
-          if (!(await confirm(`Valider l'inventaire du <b>${dfr(today())}</b> ?<br><br>${s.length} boisson(s) comptée(s) · ${ecarts} écart(s)<br>Période : du ${dfr($('#i-di').value)} au ${dfr($('#i-au').value)}<br><br>${aj ? '<b>Le stock du logiciel sera ajusté à la quantité physique.</b>' : '<span class="muted">Le stock du logiciel ne sera pas modifié.</span>'}`, { title: 'Inventaire' }))) return;
+          const modifs = s.filter((l) => reel[l.rid] !== undefined && reel[l.rid] !== phys[l.rid]);
+          if (!(await confirm(`Valider l'inventaire du <b>${dfr(today())}</b> ?<br><br>${s.length} boisson(s) comptée(s) · ${ecarts} écart(s)${modifs.length ? `<br>${modifs.length} quantité(s) réelle(s) modifiée(s) : ${modifs.map((l) => `${esc(l.Lib)} ${fq(phys[l.rid])} → <b>${fq(reel[l.rid])}</b>`).join(', ')}` : ''}<br>Période : du ${dfr($('#i-di').value)} au ${dfr($('#i-au').value)}<br><br>${aj ? '<b>Le stock du logiciel sera ajusté à la quantité réelle.</b>' : '<span class="muted">Le stock du logiciel ne sera pas modifié.</span>'}`, { title: 'Inventaire' }))) return;
           try {
-            const r = await post('/inventaire', { di: $('#i-di').value, au: $('#i-au').value, ajuster: aj, lignes: s.map((l) => ({ rid: l.rid, physique: phys[l.rid] })) });
+            const r = await post('/inventaire', { di: $('#i-di').value, au: $('#i-au').value, ajuster: aj, lignes: s.map((l) => ({ rid: l.rid, physique: phys[l.rid], reelle: reel[l.rid] ?? phys[l.rid] })) });
             ok(`Inventaire ${r.numero} enregistré (${r.nb} article(s))${r.ajuste ? ', stock ajusté au physique.' : '.'}`);
             onglet = 'bilan'; await draw();
           } catch (x) { err(x); }

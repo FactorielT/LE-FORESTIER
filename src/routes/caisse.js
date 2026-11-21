@@ -83,6 +83,7 @@ router.post('/caisse', h(async (req, res) => {
   const wave = Math.round(num(req.body.wave)), om = Math.round(num(req.body.om)), espece = Math.round(num(req.body.espece));
   if (wave < 0 || om < 0 || espece < 0) throw fail('Les montants Wave, OM et Espèce ne peuvent pas être négatifs.');
   const verse = wave + om + espece;
+  const motif = String(req.body.motif || '').trim();
   const out = await tx(async (c) => {
     await c.query(`LOCK TABLE "VERSEMENTINTERNE" IN SHARE ROW EXCLUSIVE MODE`);
     const ex = await c.query(`SELECT 1 FROM "VERSEMENTINTERNE" WHERE "DATEVERSE"=$1`, [date]);
@@ -92,16 +93,22 @@ router.post('/caisse', h(async (req, res) => {
     const avant = (await c.query(`SELECT "NumVentes", "DateVente" FROM "T_Ventes" v WHERE "DateVente" < $1 AND COALESCE("Fermer",false)=false
       AND NOT EXISTS (SELECT 1 FROM "VERSEMENTINTERNE" f WHERE f."DATEVERSE"=v."DateVente") ORDER BY "DateVente" LIMIT 1`, [date])).rows[0];
     if (avant) throw fail(`La caisse de la vente ${avant.NumVentes} du ${avant.DateVente.split('-').reverse().join('/')} doit être fermée d'abord.`);
+    const ecart = s.sommes - verse;
+    if (ecart !== 0 && motif.length < 3) throw fail(`Il y a un écart de ${Math.abs(ecart).toLocaleString('fr-FR')} (${ecart > 0 ? 'manquant' : 'excédent'}) : saisissez le motif de l'écart.`);
     await c.query(
       `INSERT INTO "VERSEMENTINTERNE"("AGENTS","SOMMES","MTDEPENSES","MTVERSER","DATEVERSE","HEUREVERSE","MOISVERSE","ANNEEVERSE","MTJRCTN","ECART",
-        "CREANCES","FONDSDECAISSEHIER","FermeCaisse","DATEENREG","CREDITSPAYES","WAVE","OM","ESPECE","BENEFICE","TOTALVERSEJOUR")
-        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13,$14,$15,$16,$17,$18,$19)`,
+        "CREANCES","FONDSDECAISSEHIER","FermeCaisse","DATEENREG","CREDITSPAYES","WAVE","OM","ESPECE","BENEFICE","TOTALVERSEJOUR","MOTIFECART")
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,true,$13,$14,$15,$16,$17,$18,$19,$20)`,
       [req.user.nom, s.sommes, s.depenses, verse, date, nowTime(), moisDe(date), anneeDe(date), s.totalVente, s.sommes - verse,
-        s.creances, s.caisseHier, today(), s.creditsPayes, wave, om, espece, s.benefice, s.totalVerseJour]
+        s.creances, s.caisseHier, today(), s.creditsPayes, wave, om, espece, s.benefice, s.totalVerseJour, ecart ? motif : null]
     );
     // La répartition est aussi reportée sur la vente du jour (bilans / statistiques)
     await c.query(`UPDATE "T_Ventes" SET "Fermer"=true, "WAVE"=$2, "OM"=$3, "ESPECE"=$4, "CREDIT"=$5 WHERE "DateVente"=$1`, [date, wave, om, espece, s.creances]);
-    return { ...s, verse, wave, om, espece, ecart: s.sommes - verse };
+    if (ecart !== 0) {
+      await c.query(`INSERT INTO "journal_ecart_caisse"(date_caisse,montant_a_verser,wave,om,espece,total_reparti,ecart,sens,motif,agent,date_enreg,heure_enreg)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`, [date, s.sommes, wave, om, espece, verse, ecart, ecart > 0 ? 'MANQUANT' : 'EXCEDENT', motif, req.user.nom, today(), nowTime()]);
+    }
+    return { ...s, verse, wave, om, espece, ecart };
   });
   res.json(out);
 }));
@@ -109,7 +116,7 @@ router.post('/caisse', h(async (req, res) => {
 router.get('/caisse/bilan', h(async (req, res) => {
   const r = await q(`SELECT rid id, "DATEENREG", "DATEVERSE", "MTJRCTN", "MTDEPENSES", "CREANCES", COALESCE("CREDITSPAYES",0) "CREDITSPAYES",
       "FONDSDECAISSEHIER", "SOMMES", "MTVERSER", COALESCE("BENEFICE",0) "BENEFICE",
-      COALESCE(NULLIF("TOTALVERSEJOUR",0), COALESCE("FONDSDECAISSEHIER",0)+COALESCE("SOMMES",0)) "TOTALVERSEJOUR", COALESCE("WAVE",0) "WAVE", COALESCE("OM",0) "OM", COALESCE("ESPECE",0) "ESPECE", "ECART", "HEUREVERSE", "AGENTS"
+      COALESCE(NULLIF("TOTALVERSEJOUR",0), COALESCE("FONDSDECAISSEHIER",0)+COALESCE("SOMMES",0)) "TOTALVERSEJOUR", COALESCE("WAVE",0) "WAVE", COALESCE("OM",0) "OM", COALESCE("ESPECE",0) "ESPECE", "ECART", "MOTIFECART", "HEUREVERSE", "AGENTS"
     FROM "VERSEMENTINTERNE" WHERE "DATEVERSE" BETWEEN $1 AND $2 ORDER BY "DATEVERSE" DESC`,
   [req.query.du || '1900-01-01', req.query.au || '2999-12-31']);
   res.json(r.rows);
@@ -122,9 +129,18 @@ router.delete('/caisse/:id', admin, h(async (req, res) => {
     const apres = (await c.query(`SELECT "NumVentes" FROM "T_Ventes" WHERE "DateVente" > $1 LIMIT 1`, [f.DATEVERSE])).rows[0];
     if (apres) throw fail(`Impossible de rouvrir : une vente plus récente existe déjà (${apres.NumVentes}). Seule la dernière journée peut être rouverte.`);
     const r = (await c.query(`DELETE FROM "VERSEMENTINTERNE" WHERE rid=$1 RETURNING "DATEVERSE"`, [Number(req.params.id)])).rows[0];
+    if (r) await c.query(`UPDATE "journal_ecart_caisse" SET statut='ANNULÉ (caisse rouverte)', annule_par=$2, date_annulation=NOW()
+      WHERE date_caisse=$1 AND statut='VALIDE'`, [r.DATEVERSE, req.user.nom]);
     if (r) await c.query(`UPDATE "T_Ventes" SET "Fermer"=false, "WAVE"=0, "OM"=0, "ESPECE"=0, "CREDIT"=0 WHERE "DateVente"=$1`, [r.DATEVERSE]);
   });
   res.json({ ok: true });
+}));
+
+// Journal des écarts de caisse (motifs)
+router.get('/caisse/ecarts', h(async (req, res) => {
+  const r = await q(`SELECT * FROM "journal_ecart_caisse" WHERE date_caisse BETWEEN $1 AND $2 ORDER BY date_caisse DESC, id DESC`,
+    [req.query.du || '1900-01-01', req.query.au || '2999-12-31']);
+  res.json(r.rows);
 }));
 
 module.exports = router;

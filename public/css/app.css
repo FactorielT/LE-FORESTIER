@@ -586,3 +586,7 @@ button.app-card .app-go { margin-top: auto; }
 .k-hier b { font-size: 22px; font-variant-numeric: tabular-nums; color: var(--ink); }
 .k-hier em { font-style: normal; font-size: 11.5px; color: var(--amber, #b26a00); }
 @media (max-width: 599px) { .k-hier { width: 100%; } }
+.inv-re { width: 96px; height: 36px; text-align: right; font-weight: 700; margin-left: auto; background: #f7fbf7; }
+.inv-re.modif { border-color: var(--amber, #e09b00); background: #fff8e6; }
+@media (max-width: 699px) { .inv-re { width: 64px; } }
+.motif-ecart textarea { min-height: 70px; }

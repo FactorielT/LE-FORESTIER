@@ -85,6 +85,13 @@ async function init() {
        date_debut DATE, date_fin DATE, ajuste BOOLEAN DEFAULT false, utilisateur VARCHAR(80))`,
     `CREATE INDEX IF NOT EXISTS inventaire_maquis_date ON "inventaire_maquis"(date_inv)`,
     `CREATE INDEX IF NOT EXISTS inventaire_maquis_num ON "inventaire_maquis"(num_inv)`,
+    // v10 : motif obligatoire en cas d'écart à la fermeture + journal des écarts (conservé même si la caisse est rouverte)
+    `ALTER TABLE "VERSEMENTINTERNE" ADD COLUMN IF NOT EXISTS "MOTIFECART" TEXT`,
+    `CREATE TABLE IF NOT EXISTS "journal_ecart_caisse" (
+       id BIGSERIAL PRIMARY KEY, date_caisse DATE, montant_a_verser BIGINT, wave BIGINT, om BIGINT, espece BIGINT, total_reparti BIGINT,
+       ecart BIGINT, sens VARCHAR(20), motif TEXT, agent VARCHAR(80), date_enreg DATE, heure_enreg TIME, statut VARCHAR(40) DEFAULT 'VALIDE',
+       annule_par VARCHAR(80), date_annulation TIMESTAMP)`,
+    `CREATE INDEX IF NOT EXISTS journal_ecart_date ON "journal_ecart_caisse"(date_caisse)`,
   ];
   for (const m of migrations) await q(m);
 
