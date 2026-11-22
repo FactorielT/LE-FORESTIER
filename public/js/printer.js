@@ -191,9 +191,33 @@ const Imprimante = (() => {
     let st = document.getElementById('print-page-style');
     if (!st) { st = document.createElement('style'); st.id = 'print-page-style'; document.head.appendChild(st); }
     const mm = Number(cfg.largeur) === 80 ? 80 : 58;
-    st.textContent = `@media print { @page { size: ${mm}mm auto; margin: 2mm; } body.printing .ticket { max-width: ${mm - 4}mm !important; font-size: ${mm === 58 ? 11 : 12.5}px; } }`;
+    // Pas de taille de page imposée : on suit le papier du pilote (58 ou 80 mm) ; marges internes pour la zone non imprimable
+    const marge = mm === 80 ? 4 : 3, fs = mm === 80 ? 12 : 10.5;
+    st.textContent = `@media print {
+      @page { margin: 0; }
+      html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; width: auto !important; min-width: 0 !important; }
+      body.printing #print-area { width: 100%; max-width: ${mm}mm; padding: 2mm ${marge}mm; box-sizing: border-box; }
+      body.printing .ticket { width: 100% !important; max-width: none !important; padding: 0 !important; margin: 0 !important; border: 0 !important; box-sizing: border-box; font-size: ${fs}px !important; color: #000 !important; }
+      body.printing .ticket * { color: #000 !important; }
+      body.printing .tk-t { table-layout: fixed; width: 100%; font-size: ${fs - 0.5}px !important; }
+      body.printing .tk-t th, body.printing .tk-t td { padding: 1px 2px 1px 0 !important; overflow-wrap: anywhere; }
+      body.printing .tk-t th:nth-child(1), body.printing .tk-t td:nth-child(1) { width: ${mm === 80 ? 9 : 11}%; }
+      body.printing .tk-t th:nth-child(3), body.printing .tk-t td:nth-child(3) { width: ${mm === 80 ? 22 : 24}%; }
+      body.printing .tk-t th:nth-child(4), body.printing .tk-t td:nth-child(4) { width: ${mm === 80 ? 24 : 27}%; padding-right: 0 !important; }
+      body.printing .tk-t .r { white-space: nowrap; overflow-wrap: normal; }
+      body.printing .tk-t td, body.printing .tk-t th, body.printing .tk-acc td { font-size: inherit !important; }
+      body.printing .tk-row { gap: 4px; }
+      body.printing .tk-row > :last-child { text-align: right; overflow-wrap: anywhere; }
+      body.printing .tk-h b { font-size: ${fs + 3}px !important; }
+      body.printing .tk-tot { font-size: ${fs + 3}px !important; }
+      body.printing .tk-logo { width: ${mm === 80 ? 22 : 18}mm; height: auto; }
+    }`;
     document.body.classList.add('printing');
-    setTimeout(() => { try { window.print(); } catch {} setTimeout(() => document.body.classList.remove('printing'), 500); }, 50);
+    // On attend que le logo soit chargé avant d'ouvrir l'impression
+    const imgs = [...z.querySelectorAll('img')].filter((i) => !i.complete);
+    Promise.race([Promise.all(imgs.map((i) => new Promise((r) => { i.onload = i.onerror = r; }))), new Promise((r) => setTimeout(r, 3000))]).then(() => {
+      setTimeout(() => { try { window.print(); } catch {} setTimeout(() => document.body.classList.remove('printing'), 500); }, 80);
+    });
   }
 
   /** Imprime un ticket selon le réglage de l'appareil. t = ticket, I = infos du restaurant, html = rendu du reçu */
