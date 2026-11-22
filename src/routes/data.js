@@ -1,3 +1,17 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/routes/data.js — OUTILS DU SUPER ADMINISTRATEUR
+   -------------------------------------------------------------------------
+   Préfixe /api/data. Contient :
+     1. L'EXPLORATEUR « Tables de la BD » (lire / modifier / supprimer des lignes
+        comme dans Excel). Le super admin du maquis ne voit que les tables du
+        maquis, celui du restaurant que les tables resto_*.
+     2. Les EXPORTS (CSV d'une table, sauvegarde Excel complète).
+     3. L'IMPORTATION des données de l'ancienne application WinDev
+        (fichier .sql, .xlsx ou .csv) — maquis uniquement.
+
+   ATTENTION : ces routes écrivent directement dans la base. Elles sont
+   protégées par « superadmin » (seul le super administrateur y a accès).
+   ========================================================================= */
 // Fenêtres réservées au SUPERADMIN : explorateur de la BD + import des données existantes
 const router = require('express').Router();
 const multer = require('multer');
@@ -16,6 +30,7 @@ router.use((req, res, next) => {
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 60 * 1024 * 1024 } });
 
 // ---------- Métadonnées ----------
+// Lit dans PostgreSQL la liste des tables, de leurs colonnes et de leur clé primaire.
 async function tablesMeta() {
   const r = await q(`
     SELECT c.table_name t, c.column_name col, c.data_type typ, c.ordinal_position pos, c.column_default def
@@ -39,6 +54,7 @@ async function tablesMeta() {
 const COMMUNES = ['T_Utilisateur', 'T_Groupe', 'parametres', 'blocage'];
 const appDe = (req) => (req && req.user && req.user.app === 'resto' ? 'resto' : 'maquis');
 const dansApp = (name, app) => (app === 'resto' ? name.startsWith('resto_') : !name.startsWith('resto_'));
+// Renvoie la description d'une table, en vérifiant qu'elle appartient à l'application du super admin connecté.
 async function getTable(name, req) {
   const meta = await tablesMeta();
   const t = meta[name];
@@ -98,6 +114,7 @@ function toBool(v) {
   if (v === null || v === undefined || v === '') return null;
   return /^(1|true|vrai|oui|yes|o|t|x)$/i.test(String(v).trim());
 }
+// Convertit le texte saisi dans la grille vers le bon type (date, nombre, oui/non...).
 function convert(v, type) {
   if (type === 'date') return toDate(v);
   if (/^time/.test(type)) return toTime(v);
@@ -113,6 +130,7 @@ function convert(v, type) {
   return String(v);
 }
 
+// Après un import, remet les compteurs automatiques (id) au bon niveau.
 async function resetSequences(client) {
   const meta = await tablesMeta();
   for (const t of Object.values(meta)) {
@@ -124,6 +142,7 @@ async function resetSequences(client) {
 }
 
 // ---------- EXPLORATEUR ----------
+// GET /api/data/tables : tables de l'application (avec le nombre de lignes).
 router.get('/tables', h(async (req, res) => {
   const meta = await tablesMeta();
   const out = [];
@@ -136,6 +155,7 @@ router.get('/tables', h(async (req, res) => {
   res.json(out.sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' })));
 }));
 
+// GET /api/data/table/:nom : une page de lignes (recherche, tri, pagination).
 router.get('/table/:name', h(async (req, res) => {
   const t = await getTable(req.params.name, req);
   const size = Math.min(Math.max(parseInt(req.query.size, 10) || 100, 10), 1000);
@@ -155,6 +175,7 @@ router.get('/table/:name', h(async (req, res) => {
   res.json({ table: t.name, pk: t.pk, columns: cols, rows, total, page, size });
 }));
 
+// PUT /api/data/table/:nom/row : modifie une cellule { pk, values }.
 router.put('/table/:name/row', h(async (req, res) => {
   const t = await getTable(req.params.name, req);
   if (!t.pk) throw fail('Cette table n\'a pas de clé primaire : modification impossible.');
@@ -175,6 +196,7 @@ router.put('/table/:name/row', h(async (req, res) => {
   res.json(row);
 }));
 
+// POST /api/data/table/:nom/row : ajoute une ligne.
 router.post('/table/:name/row', h(async (req, res) => {
   const t = await getTable(req.params.name, req);
   const values = (req.body || {}).values || {};
@@ -193,6 +215,8 @@ router.post('/table/:name/row', h(async (req, res) => {
   res.json(r.rows[0]);
 }));
 
+// POST /api/data/table/:nom/delete : supprime des lignes { ids, force }.
+// Sans « force », on prévient d'abord si d'autres tables utilisent ces lignes (réponse 409).
 router.post('/table/:name/delete', h(async (req, res) => {
   const t = await getTable(req.params.name, req);
   if (!t.pk) throw fail('Cette table n\'a pas de clé primaire.');
@@ -216,6 +240,7 @@ router.post('/table/:name/delete', h(async (req, res) => {
   res.json({ deleted: r.rowCount });
 }));
 
+// POST /api/data/table/:nom/vider : vide complètement une table (à utiliser avec prudence).
 router.post('/table/:name/vider', h(async (req, res) => {
   const t = await getTable(req.params.name, req);
   await exec(`DELETE FROM ${qi(t.name)}`);
@@ -223,6 +248,7 @@ router.post('/table/:name/vider', h(async (req, res) => {
 }));
 
 // Export : une table en CSV ou toute la base en Excel (sauvegarde)
+// GET /api/data/export/:nom.csv : télécharge une table au format CSV (ouvrable dans Excel).
 router.get('/export/:name.csv', h(async (req, res) => {
   const t = await getTable(req.params.name, req);
   const cols = t.columns.filter((c) => c.type !== 'bytea');
@@ -302,6 +328,7 @@ router.get('/modele-import.xlsx', (req, res) => {
   res.send(modeleWorkbook(ex));
 });
 
+// GET /api/data/export-complet.xlsx : sauvegarde Excel de toutes les tables de l'application.
 router.get('/export-complet.xlsx', h(async (req, res) => {
   const meta = await tablesMeta();
   const wb = XLSX.utils.book_new();
@@ -424,6 +451,7 @@ function rewriteInsert(stmt, meta) {
   return { table: t.name, sql: `INSERT INTO ${qi(t.name)} ${cols} VALUES ${m[4]}` };
 }
 
+// POST /api/data/import/analyse : lit le fichier envoyé et montre ce qui sera importé (sans rien écrire).
 router.post('/import/analyse', upload.single('fichier'), h(async (req, res) => {
   if (appDe(req) !== 'maquis') throw fail("L'importation des données WinDev concerne uniquement LE REPOS DU FORESTIER (maquis).", 403);
   if (!req.file) throw fail('Aucun fichier reçu.');
@@ -448,6 +476,7 @@ router.post('/import/analyse', upload.single('fichier'), h(async (req, res) => {
   res.json({ type: 'tableur', feuilles, tables: Object.values(meta).map((t) => ({ name: t.name, columns: t.columns.map((c) => c.name) })) });
 }));
 
+// POST /api/data/import/executer : importe vraiment les données.
 router.post('/import/executer', upload.single('fichier'), h(async (req, res) => {
   if (appDe(req) !== 'maquis') throw fail("L'importation des données WinDev concerne uniquement LE REPOS DU FORESTIER (maquis).", 403);
   if (!req.file) throw fail('Aucun fichier reçu.');
@@ -518,6 +547,7 @@ router.post('/import/executer', upload.single('fichier'), h(async (req, res) => 
 }));
 
 // Recalcule le solde de chaque créancier = total crédits - total paiements
+// POST /api/data/recalcul-creances : recalcule le solde de chaque créancier à partir des crédits et paiements.
 router.post('/recalcul-creances', h(async (req, res) => {
   if (appDe(req) !== 'maquis') throw fail("L'importation des données WinDev concerne uniquement LE REPOS DU FORESTIER (maquis).", 403);
   const client = await pool.connect();

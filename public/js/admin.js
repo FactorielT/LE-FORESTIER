@@ -1,8 +1,16 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/admin.js — PAGES D'ADMINISTRATION (communes aux deux applications)
+   -------------------------------------------------------------------------
+   Administration, numéros, paramètres, utilisateurs, importation WinDev et
+   « Tables de la BD » (explorateur façon Excel, super admin seulement).
+   API correspondante : src/routes/admin.js et src/routes/data.js.
+   ========================================================================= */
 /* Administration, importation des données et explorateur de la base (superadmin) */
 (() => {
   const { $, $$, esc, ic, get, post, put, del, api, money, ok, err, modal, confirm, table, toast } = UI;
   const go = (...a) => App.go(...a);
 
+  // PAGE ADMINISTRATION (#/admin) : tuiles vers les réglages + blocage (super admin).
   Pages['/admin'] = {
     title: 'Administration', back: '/', role: 'admin',
     async render(el) {
@@ -40,6 +48,7 @@
   };
 
   // ---------- Numéros ----------
+  // Numéros automatiques (compteurs et formats).
   Pages['/admin/numeros'] = {
     title: 'Numero', back: '/admin', role: 'admin',
     async render(el) {
@@ -70,6 +79,7 @@
   };
 
   // ---------- Paramètres ----------
+  // Paramètres généraux (table « parametres »).
   Pages['/admin/parametres'] = {
     title: 'Paramètres', back: '/admin', role: 'admin',
     async render(el) {
@@ -84,6 +94,7 @@
   };
 
   // ---------- Utilisateurs ----------
+  // Utilisateurs et groupes de l'application en cours.
   Pages['/admin/utilisateurs'] = {
     title: 'Utilisateurs', back: '/admin', role: 'admin',
     async render(el) {
@@ -141,6 +152,7 @@
   };
 
   // ---------- IMPORTATION ----------
+  // Importation des données de l'ancienne application WinDev (super admin du maquis).
   Pages['/admin/import'] = {
     title: 'Importation des données', back: '/admin', role: 'superadmin',
     async render(el) {
@@ -253,6 +265,7 @@
 
   // ---------- EXPLORATEUR DE LA BD (grille type Excel) ----------
   // Libellés lisibles des tables
+  // Noms lisibles des tables (affichés dans « Tables de la BD »). Ajoutez ici une nouvelle table si besoin.
   const LIB = {
     produit: 'Articles / stock des boissons', appro: 'Approvisionnements', T_Ventes: 'Ventes (une ligne par jour)', T_Inventaire: 'Lignes des ventes par boisson',
     inventaire_maquis: 'Inventaires physiques', client: 'Créanciers (clients)', CompteCreances: 'Soldes des créanciers', creancier: 'Crédits accordés', paiement: 'Paiements des crédits',
@@ -262,6 +275,8 @@
     resto_menu_jour: 'Menus du jour', resto_vente: 'Tickets de vente', resto_vente_ligne: 'Lignes des tickets', resto_mouvement: 'Mouvements de stock', resto_depense_type: 'Types de dépenses',
     resto_depense: 'Dépenses quotidiennes', resto_fermeture: 'Fermetures de caisse',
   };
+  // TABLES DE LA BD (#/admin/explorer) : grille façon Excel.
+  // Cliquer une cellule = la modifier (enregistrée en quittant la cellule) ; poubelle = supprimer la ligne.
   Pages['/admin/explorer'] = {
     pdf: false,
     title: () => (App.user.app === 'resto' ? 'Tables de la BD — Restaurant' : 'Tables de la BD — Maquis'), back: '/admin', role: 'superadmin',
@@ -398,6 +413,7 @@
         else if (e.key === 'Escape') { div.textContent = div.dataset.orig || ''; div.blur(); return; }
         if (t) focusCell(t[0], t[1]);
       }
+      // Enregistre une cellule modifiée (appelée quand on quitte la cellule).
       async function save(div, force) {
         const v = div.textContent;
         if (!force && v === div.dataset.orig) return;
@@ -422,6 +438,7 @@
           setTimeout(() => td.classList.remove('err'), 2500);
         }
       }
+      // Collage d'un bloc copié depuis Excel (plusieurs cellules d'un coup).
       function paste(e, div) {
         const text = (e.clipboardData || window.clipboardData).getData('text');
         if (!/[\t\n]/.test(text.replace(/\n$/, ''))) return; // collage simple : comportement normal

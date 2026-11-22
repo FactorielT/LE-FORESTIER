@@ -1,3 +1,18 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/app.js — LE « CHEF D'ORCHESTRE » DU SITE (navigateur)
+   -------------------------------------------------------------------------
+   - Écran de connexion (choix maquis / restaurant).
+   - Menu de gauche : listes NAV (maquis) et NAV_RESTO (restaurant).
+   - Navigation : l'adresse après # (ex. #/ventes) indique la page à afficher.
+     Chaque page est déclarée ailleurs sous la forme Pages['/ventes'] = { title, render }.
+   - Barre du haut : retour, titre, PDF, son, accueil, déconnexion.
+
+   POUR AJOUTER UNE PAGE :
+     1. dans pages.js (maquis) ou resto2.js (restaurant), écrivez
+          Pages['/ma-page'] = { title: 'Mon titre', back: '/', async render(el) { el.innerHTML = '...'; } };
+     2. ajoutez une ligne dans NAV ou NAV_RESTO ci-dessous :
+          { r: '/ma-page', t: 'Mon titre', i: 'list' },
+   ========================================================================= */
 /* Application : connexion, structure, navigation */
 const App = (() => {
   const { $, $$, esc, ic, get, post, err } = UI;
@@ -8,6 +23,7 @@ const App = (() => {
   let dernierEspace = 'maquis';
   try { dernierEspace = localStorage.getItem('forestier-espace') || 'maquis'; } catch {}
 
+  // Menu de gauche du RESTAURANT. Une ligne = { r: adresse, t: texte, i: icône, role: 'admin' | 'superadmin' (facultatif) }.
   const NAV_RESTO = [
     { sec: 'Restaurant' },
     { r: '/resto', t: 'Accueil restaurant', i: 'home' },
@@ -18,6 +34,7 @@ const App = (() => {
     { r: '/resto/depenses', t: 'Dépenses quotidiennes', i: 'wallet' },
     { r: '/resto/caisse', t: 'Fermeture de caisse', i: 'power' },
     { r: '/resto/imprimante', t: 'Imprimante tickets', i: 'print' },
+    { r: '/resto/guide', t: "Guide d'utilisation", i: 'guide' },
     { sec: 'Bilans' },
     { r: '/resto/bilans', t: 'Bilans des ventes', i: 'chart' },
     { r: '/resto/bilans/caisse', t: 'Bilans fermeture caisse', i: 'pie' },
@@ -28,6 +45,7 @@ const App = (() => {
     { r: '/admin/explorer', t: 'Tables de la BD', i: 'db', role: 'superadmin' },
   ];
 
+  // Menu de gauche du MAQUIS (même format que NAV_RESTO).
   const NAV = [
     { sec: 'Opérations' },
     { r: '/', t: 'Accueil', i: 'home' },
@@ -38,6 +56,7 @@ const App = (() => {
     { r: '/depenses', t: 'Dépenses quotidiennes', i: 'wallet' },
     { r: '/caisse', t: 'Fermeture de caisse', i: 'power' },
     { r: '/inventaire', t: 'Inventaire', i: 'list' },
+    { r: '/guide', t: "Guide d'utilisation", i: 'guide' },
     { sec: 'Bilans' },
     { r: '/bilans/ventes', t: 'Bilans des ventes', i: 'chart' },
     { r: '/bilans/produits', t: 'Bilan par produit', i: 'box' },
@@ -66,6 +85,7 @@ const App = (() => {
 
   // ---------- Connexion : choix de l'application puis identifiants propres à l'application ----------
   const homeDe = (app) => (app === 'resto' ? '/resto' : '/');
+  // Écran de connexion : choix de l'application puis login / mot de passe.
   function renderLogin(app) {
     if (app === undefined) { try { app = sessionStorage.getItem('forestier-login-app') || null; } catch { app = null; } }
     document.body.classList.toggle('espace-resto', app === 'resto');
@@ -126,6 +146,7 @@ const App = (() => {
   }
 
   // ---------- Structure ----------
+  // Dit à quelle application appartient une adresse (/resto/... = restaurant).
   function espaceDe(path) {
     if (path === '/portail') return 'portail';
     if (path === '/resto' || path.startsWith('/resto/')) return 'resto';
@@ -134,6 +155,7 @@ const App = (() => {
   }
   const accueil = () => (espace === 'resto' ? '/resto' : espace === 'portail' ? '/portail' : '/');
 
+  // Dessine le cadre du site : menu de gauche + barre du haut.
   function renderShell() {
     const resto = espace === 'resto';
     document.body.classList.toggle('espace-resto', resto);
@@ -156,6 +178,7 @@ const App = (() => {
         <header class="topbar"><button class="ib menu-btn" aria-label="Menu">${ic('menu')}</button>
           <button class="ib back-btn hidden" aria-label="Retour">${ic('back')}</button><h1 id="page-title"></h1>
           <button class="ib pdf-btn hidden" data-pdf title="Télécharger cette page en PDF">${ic('down')}<span>PDF</span></button>
+          <button class="ib" data-son title="Son après validation : activé / coupé">${ic(UI.sonActif() ? 'son' : 'muet')}</button>
           <button class="ib" data-home title="Accueil">${ic('home')}</button>
           <button class="ib out-btn" data-logout-top title="Déconnexion">${ic('logout')}<span>Déconnexion</span></button></header>
         <div class="print-head"><img src="/img/logo.jpg" alt=""><div><b>${esc(resto ? nomResto : nomEtab)}</b><span id="print-title"></span></div></div>
@@ -169,6 +192,12 @@ const App = (() => {
     $('[data-logout]').addEventListener('click', deconnexion);
     $('[data-logout-top]').addEventListener('click', deconnexion);
     $('[data-home]').addEventListener('click', () => go(accueil()));
+    // Bouton haut-parleur : active ou coupe le son joué après chaque validation
+    $('[data-son]').addEventListener('click', (e) => {
+      const on = !UI.sonActif(); UI.setSon(on);
+      e.currentTarget.innerHTML = ic(on ? 'son' : 'muet');
+      if (on) { UI.sonSucces(); UI.toast('Son activé après chaque validation.'); } else UI.toast('Son coupé.');
+    });
     $('[data-pdf]').addEventListener('click', async (e) => {
       const b = e.currentTarget; b.disabled = true;
       try { const f = await PDF.page({ root: $('#page') }); UI.ok(`PDF téléchargé : ${f}`); } catch (x) { UI.err(x.message || String(x)); } finally { b.disabled = false; }
@@ -190,6 +219,7 @@ const App = (() => {
     });
   }
 
+  // Fenêtre « changer mon mot de passe ».
   function changePwd() {
     const m = UI.modal({ title: 'Changer mon mot de passe', body: `
       <div class="field"><label>Ancien mot de passe</label><input class="input" type="password" name="a"></div>
@@ -205,6 +235,7 @@ const App = (() => {
   }
 
   let renderId = 0;
+  // Affiche la page correspondant à l'adresse (#/...). Appelée à chaque changement d'adresse.
   async function route() {
     if (!user) return;
     const { path, params } = parseHash();
@@ -249,6 +280,7 @@ const App = (() => {
     }
   }
 
+  // Démarrage : vérifie si quelqu'un est déjà connecté, sinon affiche la connexion.
   async function start() {
     if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
     try { const i = await get('/info'); nomEtab = i.nom || nomEtab; nomResto = i.resto || nomResto; } catch {}

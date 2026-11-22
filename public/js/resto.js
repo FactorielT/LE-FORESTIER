@@ -1,3 +1,12 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/resto.js — RESTAURANT : PORTAIL, ACCUEIL, REÇU, CAISSE, TICKETS
+   -------------------------------------------------------------------------
+   - MODES : liste des moyens de paiement affichés (Espèces, Wave, OM, MoMo, Flooz).
+     Pour en ajouter un, il faut aussi l'ajouter côté serveur (MODES_PAIEMENT
+     dans src/routes/resto.js) et à la fermeture (PAIE dans resto2.js).
+   - recuHtml() : le dessin du reçu client ; recu() : l'affiche et l'imprime.
+   - window.RestoUtil : petits outils partagés avec resto2.js.
+   ========================================================================= */
 /* ===== RESTO DU FORESTIER : pages de l'application restaurant + portail ===== */
 (() => {
   const { $, $$, esc, ic, get, post, put, del, n, money, qty, today, addDays, dfr, dlong, hm, toast, ok, err, modal, alert, confirm, table, sum, moneyInput, firstOfMonth } = UI;
@@ -9,6 +18,7 @@
   const unites = (v, u) => `${qty(Math.round(v * 100) / 100)} ${u}${Math.abs(v) > 1 ? 's' : ''}`;
 
   // ================= PORTAIL : choix de l'application =================
+  // PORTAIL (#/portail) : choix entre les deux applications (comptes « TOUS »).
   Pages['/portail'] = {
     title: 'Choisir une application',
     async render(el) {
@@ -32,6 +42,7 @@
   };
 
   // ================= ACCUEIL RESTAURANT =================
+  // ACCUEIL DU RESTAURANT (#/resto).
   Pages['/resto'] = {
     title: 'Accueil restaurant',
     async render(el) {
@@ -102,6 +113,7 @@
       ${t.annulee ? `<div class="tk-annule">TICKET ANNULÉ</div>` : ''}
       <div class="tk-sep"></div>
       <div class="tk-f">${esc(I.message || 'Merci de votre visite !')}</div></div>`;
+  // Affiche le reçu dans une fenêtre, avec les boutons Imprimer / Annuler le ticket.
   async function recu(t, { nouveau = false } = {}) {
     const I = await info();
     const html = recuHtml(t, I);
@@ -124,6 +136,7 @@
     });
   }
   // ================= VENTE (caisse comptoir) =================
+  // CAISSE DU RESTAURANT (#/resto/vente) : carte à gauche, commande et paiement à droite.
   Pages['/resto/vente'] = {
     title: 'Vente — caisse', back: '/resto',
     async render(el) {
@@ -181,6 +194,7 @@
         if (!p.accompagnements || !p.accompagnements.length) return ajouterLigne(p, []);
         choisirAccomp(p);
       }
+      // Fenêtre de choix de l'accompagnement quand un plat en propose.
       function choisirAccomp(p) {
         const m = modal({ title: p.nom, body: `
           <p class="muted" style="margin-top:0">${p.accomp_obligatoire ? 'Choisissez l\'accompagnement (obligatoire).' : 'Ajoutez un accompagnement si le client le souhaite.'}</p>
@@ -242,6 +256,7 @@
         $('#p-bar').classList.toggle('on', panier.length > 0);
         if ($('#b-go')) $('#b-go').addEventListener('click', () => $('#p-cart-wrap').scrollIntoView({ behavior: 'smooth' }));
       }
+      // Bouton « Encaisser » : vérifications, question Oui/Non, envoi, puis affichage du reçu.
       async function encaisser() {
         const t = total();
         const recuV = mode === 'ESPECE' ? (recuInput && recuInput.get()) || t : t;
@@ -264,6 +279,7 @@
   };
 
   // ================= TICKETS =================
+  // LISTE DES TICKETS (#/resto/tickets).
   Pages['/resto/tickets'] = {
     pdf: true,
     title: 'Tickets / reçus', back: '/resto',

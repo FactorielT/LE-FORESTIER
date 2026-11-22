@@ -1,3 +1,11 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/routes/admin.js — ADMINISTRATION (réservé aux administrateurs)
+   -------------------------------------------------------------------------
+   Préfixe /api/admin :
+     numéros automatiques, paramètres, utilisateurs, groupes, blocage.
+   Chaque application voit seulement SES utilisateurs (colonne
+   T_Utilisateur.Application = MAQUIS ou RESTO).
+   ========================================================================= */
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const { q } = require('../db');
@@ -7,6 +15,7 @@ router.use(admin);
 
 // Numéros automatiques
 const COLS_NUM = ['numCli', 'numCmde', 'Numappro', 'numprod', 'MATRICU', 'NumInvent'];
+// GET /api/admin/numeros : derniers numéros utilisés et formats (ex. V{AA}-{N}).
 router.get('/numeros', h(async (req, res) => {
   const r = await q(`SELECT * FROM "numero" ORDER BY rid LIMIT 1`);
   const p = (await q(`SELECT cle, valeur FROM "parametres"`)).rows.reduce((a, x) => ((a[x.cle] = x.valeur), a), {});
@@ -23,6 +32,7 @@ router.get('/numeros', h(async (req, res) => {
     },
   });
 }));
+// PUT /api/admin/numeros : enregistre les compteurs et formats de numéros.
 router.put('/numeros', h(async (req, res) => {
   const b = req.body || {};
   const r = await q(`SELECT rid FROM "numero" ORDER BY rid LIMIT 1`);
@@ -42,9 +52,11 @@ router.put('/numeros', h(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// GET /api/admin/parametres : tous les paramètres (table « parametres » : clé → valeur).
 router.get('/parametres', h(async (req, res) => {
   res.json((await q(`SELECT cle, valeur FROM "parametres" ORDER BY cle`)).rows);
 }));
+// PUT /api/admin/parametres : modifie UN paramètre { cle, valeur }.
 router.put('/parametres', h(async (req, res) => {
   const { cle, valeur } = req.body || {};
   if (!cle) throw fail('Clé manquante.');
@@ -60,11 +72,13 @@ function appCible(req, demande) {
   if (voitTout(req) && APPS.includes(demande)) return demande;
   return appSession(req);
 }
+// Un même login ne peut exister qu'une fois par application.
 async function verifierLoginLibre(login, app, saufId = 0) {
   const ex = await q(`SELECT "Application" FROM "T_Utilisateur" WHERE LOWER(TRIM("Login"))=LOWER(TRIM($1)) AND "IDT_Utilisateur"<>$2
     AND (COALESCE("Application",'MAQUIS')=$3 OR "Application"='TOUS' OR $3='TOUS')`, [login, saufId, app]);
   if (ex.rowCount) throw fail(`Le login « ${login} » est déjà utilisé pour cette application.`);
 }
+// Vérifie que le compte à modifier appartient bien à l'application en cours.
 async function utilisateurAccessible(req, id) {
   const cur = (await q(`SELECT * FROM "T_Utilisateur" WHERE "IDT_Utilisateur"=$1`, [id])).rows[0];
   if (!cur) throw fail('Utilisateur introuvable.', 404);
@@ -72,14 +86,17 @@ async function utilisateurAccessible(req, id) {
   if (roleOf(cur.NomGroupe) === 'superadmin' && req.user.role !== 'superadmin') throw fail('Modification non autorisée.', 403);
   return cur;
 }
+// GET /api/admin/utilisateurs : comptes de l'application en cours.
 router.get('/utilisateurs', h(async (req, res) => {
   const r = await q(`SELECT "IDT_Utilisateur" id, "Nom", "Prenom", "Login", "NomGroupe", COALESCE("Application",'MAQUIS') "Application" FROM "T_Utilisateur"
     WHERE $1 OR COALESCE("Application",'MAQUIS')=$2 ORDER BY "Application", "Nom", "Prenom"`, [voitTout(req), appSession(req)]);
   res.json(r.rows);
 }));
+// Empêche un simple administrateur de donner le groupe super admin.
 function checkGroupe(req, groupe) {
   if (roleOf(groupe) === 'superadmin' && req.user.role !== 'superadmin') throw fail('Seul le super administrateur peut attribuer ce groupe.', 403);
 }
+// POST /api/admin/utilisateurs : crée un compte (le mot de passe est chiffré avec bcrypt).
 router.post('/utilisateurs', h(async (req, res) => {
   const b = req.body || {};
   if (!b.Login || !b.mdp) throw fail('Login et mot de passe obligatoires.');
@@ -90,6 +107,7 @@ router.post('/utilisateurs', h(async (req, res) => {
     [b.Nom || '', b.Prenom || '', String(b.Login).trim(), bcrypt.hashSync(String(b.mdp), 10), b.NomGroupe || 'CAISSIER', app]);
   res.json({ ok: true });
 }));
+// PUT /api/admin/utilisateurs/:id : modifie un compte (mot de passe changé seulement s'il est saisi).
 router.put('/utilisateurs/:id', h(async (req, res) => {
   const b = req.body || {};
   const id = Number(req.params.id);
@@ -103,6 +121,7 @@ router.put('/utilisateurs/:id', h(async (req, res) => {
   if (b.mdp) await q(`UPDATE "T_Utilisateur" SET mdp=$1 WHERE "IDT_Utilisateur"=$2`, [bcrypt.hashSync(String(b.mdp), 10), id]);
   res.json({ ok: true });
 }));
+// DELETE /api/admin/utilisateurs/:id : supprime un compte (pas le sien).
 router.delete('/utilisateurs/:id', h(async (req, res) => {
   const id = Number(req.params.id);
   if (id === req.user.id) throw fail('Vous ne pouvez pas supprimer votre propre compte.');
@@ -112,6 +131,7 @@ router.delete('/utilisateurs/:id', h(async (req, res) => {
 }));
 
 // Groupes
+// Groupes d'utilisateurs : le NOM du groupe donne le rôle (SUPER... = super admin, ADMIN... = administrateur, autre = caissier).
 router.get('/groupes', h(async (req, res) => {
   res.json((await q(`SELECT "IDT_Groupe" id, libelle FROM "T_Groupe" ORDER BY libelle`)).rows);
 }));
@@ -127,6 +147,7 @@ router.delete('/groupes/:id', superadmin, h(async (req, res) => {
 }));
 
 // Blocage de l'application (superadmin)
+// Blocage : quand il est actif, seuls les super admins peuvent se connecter.
 router.get('/blocage', h(async (req, res) => {
   const r = await q(`SELECT bloc FROM "blocage" WHERE bloc=true LIMIT 1`);
   res.json({ bloc: r.rowCount > 0 });

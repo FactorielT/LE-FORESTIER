@@ -1,8 +1,23 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/routes/ventes.js — MAQUIS : VENTE DE LA JOURNÉE
+   -------------------------------------------------------------------------
+   Principe : une seule vente par date. Pour chaque boisson on saisit la
+   quantité RESTANTE le soir ; l'application calcule :
+       vendu = stock de départ (stock + appros du jour) − restant
+   Tables : T_Ventes (une ligne = une journée), T_Inventaire (une ligne par
+   boisson vendue), produit (stock), appro (marqué « pris en compte »).
+
+   Règles importantes :
+     - les ventes se saisissent dans l'ordre des dates ;
+     - pas de nouvelle vente tant que la caisse de la précédente n'est pas fermée ;
+     - une vente peut être modifiée tant que sa caisse n'est pas fermée.
+   ========================================================================= */
 const router = require('express').Router();
 const { q, tx } = require('../db');
 const { admin, h, fail, num, today, nowTime, isDate, nextNumero, estFermee } = require('../util');
 const { recalcProduit } = require('./stock');
 
+// Total des créances saisies pour une date.
 async function creditJour(c, date) {
   const r = await c.query(`SELECT COALESCE(SUM(montantcreance),0) t FROM "creancier" WHERE datecreance=$1`, [date]);
   return Number(r.rows[0].t);
@@ -10,6 +25,7 @@ async function creditJour(c, date) {
 
 // Approvisionnements pas encore pris en compte dans une vente.
 // "jusqua" = appros datés <= date de vente (ils entrent dans la vente) ; "futur" = appros datés après (déjà dans le stock, à mettre de côté).
+// Appros pas encore utilisés par une vente : « jusqua » = datés avant ou le jour de la vente, « futur » = après.
 async function approsEnAttente(c, date, numero = null) {
   const r = await c.query(
     `SELECT ref, UPPER(TRIM("Lib")) lib, (dateappro <= $1) jusqua, SUM(qte) qte FROM "appro"
@@ -17,6 +33,7 @@ async function approsEnAttente(c, date, numero = null) {
   return { jusqua: r.rows.filter((x) => x.jusqua), futur: r.rows.filter((x) => !x.jusqua) };
 }
 
+// Additionne les quantités d'appro qui concernent un article (par référence ou par nom).
 function approPour(p, rows) {
   let t = 0;
   for (const a of rows) {
@@ -25,6 +42,7 @@ function approPour(p, rows) {
   return t;
 }
 
+// La vente la plus récente (par date).
 async function derniereVente(c) {
   const r = await c.query(`SELECT "NumVentes", "DateVente" FROM "T_Ventes" ORDER BY "DateVente" DESC, "IDT_Ventes" DESC LIMIT 1`);
   return r.rows[0] || null;
@@ -33,6 +51,7 @@ const lendemain = (iso) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.
 const fr = (iso) => String(iso).split('-').reverse().join('/');
 
 // Annule une vente : remet les quantités vendues en stock et libère les approvisionnements
+// Annule une vente : remet les quantités en stock, libère les appros, supprime les lignes.
 async function annulerVente(c, numero) {
   const lignes = (await c.query(`SELECT * FROM "T_Inventaire" WHERE "NumInventaire"=$1`, [numero])).rows;
   for (const l of lignes) {
@@ -49,6 +68,8 @@ async function annulerVente(c, numero) {
   await c.query(`DELETE FROM "T_Ventes" WHERE "NumVentes"=$1`, [numero]);
 }
 
+// GET /api/ventes/preparer?date= : prépare l'écran de saisie (stock de départ de chaque boisson),
+// ou explique pourquoi la saisie est bloquée (caisse précédente non fermée, date dans le futur...).
 router.get('/ventes/preparer', h(async (req, res) => {
   const date = req.query.date;
   if (!isDate(date)) throw fail('Date invalide.');
@@ -88,6 +109,8 @@ router.get('/ventes/preparer', h(async (req, res) => {
   res.json({ ...info, existe: ex, modification: !!ex, lignesExistantes, produits });
 }));
 
+// POST /api/ventes : enregistre (ou modifie si « numero » est fourni) la vente d'une journée.
+// Pour chaque boisson : vendu = départ − restant ; total = vendu × prix de vente ; bénéfice = total − vendu × prix d'achat.
 router.post('/ventes', h(async (req, res) => {
   const b = req.body || {};
   const date = b.date;
@@ -157,6 +180,7 @@ router.post('/ventes', h(async (req, res) => {
   res.json(out);
 }));
 
+// GET /api/ventes?du=&au= : liste des ventes (bilans).
 router.get('/ventes', h(async (req, res) => {
   const r = await q(
     `SELECT "IDT_Ventes" id, "NumVentes", "DateVente", "DATEENREG", "TotalVentes", "TotalAchat", "Benefice", "WAVE", "OM", "ESPECE",
@@ -167,6 +191,7 @@ router.get('/ventes', h(async (req, res) => {
   res.json(r.rows);
 }));
 
+// GET /api/ventes/detail?numero= : entête + lignes d'une vente.
 router.get('/ventes/detail', h(async (req, res) => {
   const numero = req.query.numero;
   const v = (await q(`SELECT * FROM "T_Ventes" WHERE "NumVentes"=$1 ORDER BY "IDT_Ventes" LIMIT 1`, [numero])).rows[0];
@@ -180,6 +205,7 @@ router.get('/ventes/detail', h(async (req, res) => {
   res.json({ vente: v || null, lignes, creditJour: credit });
 }));
 
+// DELETE /api/ventes?numero= : supprime la DERNIÈRE vente seulement (administrateur ; super admin si la caisse est fermée).
 router.delete('/ventes', admin, h(async (req, res) => {
   const numero = req.query.numero;
   await tx(async (c) => {

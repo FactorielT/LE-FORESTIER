@@ -1,3 +1,15 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/ui.js — BOÎTE À OUTILS DE L'INTERFACE (navigateur)
+   -------------------------------------------------------------------------
+   Tout le reste du site utilise ces outils via « UI.xxx » :
+     - $ / $$ : chercher un élément de la page (comme document.querySelector).
+     - get / post / put / del : appeler l'API du serveur (/api/...).
+     - money(1500) → « 1 500 », dfr('2026-11-22') → « 22/11/2026 ».
+     - ok('message') : message vert + son ; err(erreur) : message rouge + son.
+     - modal() : fenêtre ; confirm() : question Oui / Non ; alert() : information.
+     - table() : fabrique un tableau à partir d'une liste de lignes.
+     - ic('nom') : icône (liste des icônes dans l'objet ICONS).
+   ========================================================================= */
 /* Outils d'interface : API, formatage, icônes, modales, tableaux */
 const UI = (() => {
   const $ = (s, r = document) => r.querySelector(s);
@@ -5,6 +17,7 @@ const UI = (() => {
   const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   // ----- API -----
+  // Appel au serveur. Renvoie les données JSON, ou lance une erreur avec le message du serveur.
   async function api(url, opts = {}) {
     const o = { method: opts.method || 'GET', headers: {}, credentials: 'same-origin' };
     if (opts.body instanceof FormData) o.body = opts.body;
@@ -24,6 +37,7 @@ const UI = (() => {
 
   // ----- Format -----
   const n = (v) => { const x = Number(String(v ?? '').replace(/[\s  ]/g, '').replace(',', '.')); return Number.isFinite(x) ? x : 0; };
+  // money(1500) → « 1 500 »   qty(2.5) → « 2,5 »   dfr('2026-11-22') → « 22/11/2026 »
   const money = (v) => Math.round(Number(v) || 0).toLocaleString('fr-FR').replace(/ | /g, ' ');
   const qty = (v) => { const x = Number(v) || 0; return Number.isInteger(x) ? x.toLocaleString('fr-FR').replace(/ | /g, ' ') : x.toLocaleString('fr-FR', { maximumFractionDigits: 3 }).replace(/ | /g, ' '); };
   const pad = (x) => String(x).padStart(2, '0');
@@ -73,11 +87,15 @@ const UI = (() => {
     list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
     clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
     save: '<path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><path d="M17 21v-8H7v8M7 3v5h8"/>',
+    son: '<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7M19 5a10 10 0 0 1 0 14"/>',
+    muet: '<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="m22 9-6 6M16 9l6 6"/>',
+    guide: '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5v14z"/><path d="M8 7h8M8 11h6"/>',
     print: '<path d="M6 9V2h12v7M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>',
   };
   const ic = (name, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${extra}>${P[name] || ''}</svg>`;
 
   // ----- Toast -----
+  // Petit message en haut de l'écran (vert = succès, rouge = erreur).
   function toast(msg, type = '') {
     const el = document.createElement('div');
     el.className = 'toast ' + type;
@@ -86,10 +104,46 @@ const UI = (() => {
     // Toast de succès : 2 secondes ; erreur : 5 secondes
     setTimeout(() => { el.classList.add('out'); setTimeout(() => el.remove(), 300); }, type === 'err' ? 5000 : type === 'ok' ? 2000 : 2500);
   }
-  const ok = (m) => toast(m, 'ok');
-  const err = (e) => toast(e && e.message ? e.message : String(e), 'err');
+  // ----- Son après une validation -----
+  // Un petit « ding » est joué quand le message vert (succès) s'affiche, un son grave pour une erreur.
+  // Le son est fabriqué par le navigateur (Web Audio) : aucun fichier audio à télécharger.
+  // On peut le couper : bouton haut-parleur dans la barre du haut (réglage gardé sur l'appareil).
+  let audio = null;
+  const sonActif = () => { try { return localStorage.getItem('forestier-son') !== 'off'; } catch { return true; } };
+  const setSon = (on) => { try { localStorage.setItem('forestier-son', on ? 'on' : 'off'); } catch {} };
+  function contexteAudio() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    if (!audio) audio = new AC();
+    if (audio.state === 'suspended') audio.resume().catch(() => {});
+    return audio;
+  }
+  // Les navigateurs n'autorisent le son qu'après un clic : on « réveille » l'audio au premier clic
+  ['pointerdown', 'keydown'].forEach((ev) => window.addEventListener(ev, () => { if (sonActif()) contexteAudio(); }, { once: true, capture: true }));
+  /** Joue une suite de notes : [fréquence en Hz, début en s, durée en s] */
+  function bip(notes, volume = 0.18, forme = 'sine') {
+    if (!sonActif()) return;
+    const ctx = contexteAudio();
+    if (!ctx) return;
+    const t0 = ctx.currentTime + 0.01;
+    for (const [freq, debut, duree] of notes) {
+      const o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = forme; o.frequency.value = freq;
+      g.gain.setValueAtTime(0.0001, t0 + debut);
+      g.gain.exponentialRampToValueAtTime(volume, t0 + debut + 0.015);
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + debut + duree);
+      o.connect(g).connect(ctx.destination);
+      o.start(t0 + debut); o.stop(t0 + debut + duree + 0.05);
+    }
+  }
+  const sonSucces = () => bip([[880, 0, 0.16], [1318.5, 0.11, 0.32]]); // deux notes montantes (ding-dong)
+  const sonErreur = () => bip([[220, 0, 0.18], [175, 0.16, 0.3]], 0.16, 'triangle'); // deux notes graves
+
+  const ok = (m) => { toast(m, 'ok'); sonSucces(); };
+  const err = (e) => { toast(e && e.message ? e.message : String(e), 'err'); sonErreur(); };
 
   // ----- Modale -----
+  // Ouvre une fenêtre par-dessus la page. Renvoie { el, close, $, $$ }.
   function modal({ title, body, foot, wide, onClose }) {
     const bg = document.createElement('div');
     bg.className = 'modal-bg';
@@ -129,6 +183,9 @@ const UI = (() => {
    * cols: [{k, t, cls, f(row), r(alignement droite)}]
    * opts: {onClick(row, tr, idx), onDbl, selectable, foot: [..], empty, rowCls(row)}
    */
+  // Fabrique un tableau HTML.
+  // cols : [{ t: 'Titre', f: (ligne) => 'contenu', r: 1 (aligné à droite) }]
+  // rows : la liste des lignes ; opts : { onClick, selectable, foot, empty }
   function table(el, cols, rows, opts = {}) {
     const th = cols.map((c) => `<th class="${c.r ? 'r' : ''} ${c.c ? 'c' : ''} ${c.first ? 'first' : ''} ${c.hm ? 'hide-m' : ''}">${c.t}</th>`).join('');
     const body = rows.length
@@ -159,6 +216,7 @@ const UI = (() => {
   const sum = (rows, k) => rows.reduce((a, r) => a + (Number(typeof k === 'function' ? k(r) : r[k]) || 0), 0);
 
   // Champ montant formaté (espaces de milliers)
+  // Champ de montant qui affiche les espaces de milliers pendant la saisie.
   function moneyInput(input, onChange) {
     const fmt = () => { const v = n(input.value); input.value = input.value === '' ? '' : money(v); };
     input.setAttribute('inputmode', 'numeric');
@@ -169,5 +227,5 @@ const UI = (() => {
   }
 
   const ask = (msg, o = {}) => confirm(msg, { title: 'Confirmation', ...o });
-  return { ask, $, $$, esc, api, get, post, put, del, n, money, qty, today, addDays, firstOfMonth, dfr, dlong, hm, ic, toast, ok, err, modal, alert, confirm, table, loading, sum, moneyInput };
+  return { sonActif, setSon, sonSucces, ask, $, $$, esc, api, get, post, put, del, n, money, qty, today, addDays, firstOfMonth, dfr, dlong, hm, ic, toast, ok, err, modal, alert, confirm, table, loading, sum, moneyInput };
 })();

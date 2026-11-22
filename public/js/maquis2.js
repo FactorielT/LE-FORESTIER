@@ -1,3 +1,7 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/maquis2.js — MAQUIS : PAGE INVENTAIRE + BILAN PAR PRODUIT
+   (même principe que pages.js ; API dans src/routes/stock.js et stats.js)
+   ========================================================================= */
 /* Maquis : inventaire physique (comme GESTION MRPA) et bilan des ventes par produit */
 (() => {
   const { $, $$, esc, ic, get, post, del, n, money, qty, today, dfr, ok, err, alert, confirm, table, sum, loading, firstOfMonth } = UI;
@@ -6,6 +10,7 @@
   const fq = (v) => qty(Math.round(v * 1000) / 1000);
 
   // ================= INVENTAIRE =================
+  // PAGE INVENTAIRE (#/inventaire) : onglet saisie + onglet bilans des inventaires.
   Pages['/inventaire'] = {
     pdf: true,
     title: 'Inventaire', back: '/',
@@ -153,6 +158,7 @@
   };
 
   // ================= BILAN DES VENTES PAR PRODUIT =================
+  // PAGE BILAN PAR PRODUIT (#/bilans/produits).
   Pages['/bilans/produits'] = {
     pdf: true,
     title: 'Bilan par produit', back: '/',

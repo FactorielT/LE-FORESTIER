@@ -1,3 +1,8 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/resto2.js — RESTAURANT : MENUS, STOCK, DÉPENSES, CAISSE, BILANS,
+                         PARAMÈTRES ET IMPRIMANTE
+   (même principe que pages.js ; API dans src/routes/resto.js)
+   ========================================================================= */
 /* ===== RESTO DU FORESTIER : menus, stock, dépenses, caisse, bilans, paramètres ===== */
 (() => {
   const { $, $$, esc, ic, get, post, put, del, n, money, qty, today, addDays, dfr, dlong, hm, toast, ok, err, modal, alert, confirm, table, sum, moneyInput, firstOfMonth } = UI;
@@ -9,6 +14,7 @@
   const TYPES_MVT = { APPRO: 'Approvisionnement', VENTE: 'Vente', ANNULATION: 'Annulation ticket', FIN_SAC: 'Sac terminé', AJUSTEMENT: 'Ajustement inventaire' };
 
   // ================= MENUS =================
+  // MENUS (#/resto/menus) : onglets Menu du jour / Menu fixe / Tous / Accompagnements.
   Pages['/resto/menus'] = {
     title: 'Menus', back: '/resto',
     async render(el, params) {
@@ -82,6 +88,7 @@
         };
         await load();
       }
+      // Fiche d'un plat ou d'un accompagnement (prix, stock consommé, accompagnements proposés).
       function editer(p, estAcc = false) {
         const isNew = !p;
         p = p || { nom: '', categorie: estAcc ? 'Accompagnements' : 'Plats', prix: '', menu: estAcc ? 'accomp' : 'fixe', actif: true, ressources: [], accompagnements: [], accomp_obligatoire: false, vendable_seul: true };
@@ -136,6 +143,7 @@
   };
 
   // ================= STOCK =================
+  // STOCK DU RESTAURANT (#/resto/stock) : une carte par article.
   Pages['/resto/stock'] = {
     title: 'Stock du restaurant', back: '/resto',
     async render(el) {
@@ -221,6 +229,7 @@
       { t: 'Détail', f: (r) => esc(r.motif || ''), cls: 'wrap' }, { t: 'Agent', f: (r) => esc(r.agent || '') },
     ], rows, { empty: 'Aucun mouvement.' });
   }
+  // MOUVEMENTS DE STOCK (#/resto/stock/mouvements).
   Pages['/resto/stock/mouvements'] = {
     pdf: true,
     title: 'Mouvements de stock', back: '/resto/stock',
@@ -244,6 +253,7 @@
   };
 
   // ================= DÉPENSES =================
+  // DÉPENSES DU RESTAURANT (#/resto/depenses).
   Pages['/resto/depenses'] = {
     title: 'Dépenses du restaurant', back: '/resto',
     async render(el, params) {
@@ -292,6 +302,7 @@
   };
 
   // ================= FERMETURE DE CAISSE =================
+  // FERMETURE DE CAISSE DU RESTAURANT (#/resto/caisse).
   Pages['/resto/caisse'] = {
     title: 'Fermeture de caisse', back: '/resto',
     async render(el, params) {
@@ -367,6 +378,7 @@
   };
 
   // ================= BILANS =================
+  // BILANS DES VENTES DU RESTAURANT (#/resto/bilans).
   Pages['/resto/bilans'] = {
     pdf: true,
     title: 'Bilans des ventes', back: '/resto',
@@ -478,6 +490,7 @@
     },
   };
 
+  // BILANS FERMETURE CAISSE DU RESTAURANT.
   Pages['/resto/bilans/caisse'] = {
     pdf: true,
     title: 'Bilans fermeture caisse', back: '/resto',
@@ -502,6 +515,7 @@
   };
 
   // ================= PARAMÈTRES DU RESTAURANT =================
+  // PARAMÈTRES DU RESTAURANT (#/resto/parametres) : articles du stock + informations du reçu.
   Pages['/resto/parametres'] = {
     title: 'Paramètres du restaurant', back: '/resto', role: 'admin',
     async render(el) {
@@ -570,6 +584,7 @@
     },
   };
   // ================= IMPRIMANTE DES TICKETS (réglage par appareil) =================
+  // IMPRIMANTE DES TICKETS (#/resto/imprimante) : réglage propre à chaque appareil.
   Pages['/resto/imprimante'] = {
     title: 'Imprimante des tickets', back: '/resto',
     async render(el) {

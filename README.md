@@ -1,8 +1,10 @@
 # LE REPOS DU FORESTIER + RESTO DU FORESTIER — Applications de gestion
 
+> **Développeurs :** lisez d'abord [GUIDE-DEVELOPPEUR.md](GUIDE-DEVELOPPEUR.md). Il présente l'organisation du projet et les modifications courantes. Le guide des utilisateurs est dans l'application, menu **Guide d'utilisation**.
+
 Deux applications en une : sur l'écran de connexion, on choisit d'abord **LE REPOS DU FORESTIER** (maquis / bar / cave, en vert) ou **RESTO DU FORESTIER** (restaurant, en bleu), puis on saisit les identifiants **de cette application**.
 
-**Chaque application a ses propres comptes** (login et mot de passe) : un compte du maquis ne peut pas ouvrir le restaurant et inversement (le même login peut exister dans les deux avec des mots de passe différents). Chaque administrateur ne voit et ne crée que les utilisateurs de son application. Seul le **super administrateur** (« Les deux applications ») peut passer de l'une à l'autre sans se reconnecter et attribuer un compte à l'une, l'autre ou aux deux.
+**Chaque application a ses propres comptes** (login et mot de passe) : un compte du maquis ne peut pas ouvrir le restaurant et inversement (le même login peut exister dans les deux avec des mots de passe différents). Chaque administrateur ne voit et ne crée que les utilisateurs de son application. Chaque application a son propre **super administrateur** (login `superadmin` dans les deux, avec des mots de passe différents) : il est le seul à voir les tables de la base de SON application (menu « Tables de la BD »).
 
 Comptes créés au premier démarrage : `superadmin` / `admin123` (les deux applications, variable `SUPERADMIN_PASSWORD`) et `adminresto` / `resto123` (restaurant, variable `RESTO_ADMIN_PASSWORD`). Changez ces mots de passe dès la première connexion. Les données du restaurant sont dans des tables séparées (`resto_*`).
 

@@ -1,3 +1,6 @@
+/* Service worker : permet d'installer l'application sur le téléphone (PWA).
+   Il essaie toujours le réseau d'abord ; s'il n'y a pas de connexion, il
+   affiche la dernière version gardée en cache. */
 // Service worker minimal : permet l'installation sur téléphone (PWA). Réseau d'abord, cache en secours pour l'interface.
 const CACHE = 'forestier-v1';
 self.addEventListener('install', (e) => self.skipWaiting());

@@ -1,3 +1,13 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/routes/stock.js — MAQUIS : ARTICLES, APPROVISIONNEMENTS, INVENTAIRE
+   -------------------------------------------------------------------------
+   Préfixe /api (application maquis) :
+     /produits              liste, ajout, modification, suppression des boissons
+     /appros                approvisionnements (le stock augmente, et le montant
+                            est ajouté aux dépenses du jour)
+     /inventaire/...        inventaire physique (comme GESTION MRPA)
+   Tables utilisées : produit, appro, DEPENSEQUOTIDIEN, inventaire_maquis.
+   ========================================================================= */
 const router = require('express').Router();
 const { q, tx } = require('../db');
 const { admin, isAdmin, h, fail, num, today, nowTime, moisDe, anneeDe, isDate, nextNumero, verifierJourOuvert } = require('../util');
@@ -7,16 +17,19 @@ const SEL_PRODUIT = `SELECT rid, ref, "Lib", COALESCE(qte,0) qte, COALESCE(pu,0)
 
 const DEPENSE_APPRO = 'APPROVISIONNEMENT DE PRODUIT';
 
+// Recalcule les colonnes « total » (valeur au prix de vente) et « totalFour » (valeur au prix d'achat) d'un article.
 async function recalcProduit(client, rid) {
   await client.query(`UPDATE "produit" SET total=ROUND(COALESCE(qte,0)*COALESCE(pu,0)), "totalFour"=ROUND(COALESCE(qte,0)*COALESCE("prixFour",0)) WHERE rid=$1`, [rid]);
 }
 
 // ---------- PRODUITS / STOCK ----------
+// GET /api/produits : liste des boissons avec stock et prix.
 router.get('/produits', h(async (req, res) => {
   const r = await q(`${SEL_PRODUIT} ORDER BY "Lib"`);
   res.json(r.rows);
 }));
 
+// POST /api/produits : nouvel article. La référence est générée si elle est vide (format_produit).
 router.post('/produits', h(async (req, res) => {
   const b = req.body || {};
   const lib = String(b.Lib || '').trim().toUpperCase();
@@ -37,6 +50,7 @@ router.post('/produits', h(async (req, res) => {
   res.json(out);
 }));
 
+// PUT /api/produits/:rid : modifie un article (la quantité : administrateur seulement).
 router.put('/produits/:rid', h(async (req, res) => {
   const b = req.body || {};
   const rid = Number(req.params.rid);
@@ -59,12 +73,16 @@ router.put('/produits/:rid', h(async (req, res) => {
   res.json(out);
 }));
 
+// DELETE /api/produits/:rid : supprime un article (administrateur).
 router.delete('/produits/:rid', admin, h(async (req, res) => {
   await q(`DELETE FROM "produit" WHERE rid=$1`, [Number(req.params.rid)]);
   res.json({ ok: true });
 }));
 
 // ---------- APPROVISIONNEMENTS ----------
+// POST /api/appros : enregistre un approvisionnement { date, lignes: [{ rid, qte }] }.
+// Étapes : vérifier que la journée n'est pas fermée → numéro d'appro → une ligne par boisson
+// → stock augmenté → une dépense « APPROVISIONNEMENT DE PRODUIT » du montant total.
 router.post('/appros', h(async (req, res) => {
   const { date, lignes, fournisseur } = req.body || {};
   if (!isDate(date)) throw fail("Date d'achat invalide.");
@@ -104,6 +122,7 @@ router.post('/appros', h(async (req, res) => {
   res.json(out);
 }));
 
+// GET /api/appros?du=&au= : liste des approvisionnements regroupés par numéro.
 router.get('/appros', h(async (req, res) => {
   const { du, au } = req.query;
   const r = await q(
@@ -114,6 +133,7 @@ router.get('/appros', h(async (req, res) => {
   res.json(r.rows);
 }));
 
+// GET /api/appros/detail?numero=&date= : les lignes d'un approvisionnement.
 router.get('/appros/detail', h(async (req, res) => {
   const r = await q(
     `SELECT rid, "IDapproAB" numero, "DATEENREG", dateappro, heureappro, ref, "Lib", qte, "prixFour", "totalFour", pu, agent, "NumVente"
@@ -123,6 +143,7 @@ router.get('/appros/detail', h(async (req, res) => {
   res.json(r.rows);
 }));
 
+// DELETE /api/appros : supprime un appro (stock diminué, dépense automatique supprimée). Refusé s'il est déjà pris dans une vente.
 router.delete('/appros', admin, h(async (req, res) => {
   const { numero, date } = req.query;
   await tx(async (c) => {
@@ -148,6 +169,7 @@ router.delete('/appros', admin, h(async (req, res) => {
 // ---------- INVENTAIRE PHYSIQUE (comme GESTION MRPA) ----------
 // Pour chaque boisson : stock du dernier inventaire + appro de la période = stock de départ ;
 // stock actuel du logiciel comparé à la quantité physique comptée -> écart.
+// Prépare une ligne d'inventaire par boisson : dernier inventaire + appros de la période = stock de départ.
 async function lignesInventaire(c, di, au) {
   const prods = (await c.query(`${SEL_PRODUIT} ORDER BY "Lib"`)).rows;
   const derniers = (await c.query(`SELECT DISTINCT ON (COALESCE(ref, UPPER(TRIM(lib)))) ref, UPPER(TRIM(lib)) lib, qte_juste, date_inv
@@ -163,6 +185,7 @@ async function lignesInventaire(c, di, au) {
   });
 }
 
+// GET /api/inventaire/preparer : tableau de saisie de l'inventaire.
 router.get('/inventaire/preparer', h(async (req, res) => {
   const last = (await q(`SELECT MAX(date_inv) d FROM "inventaire_maquis"`)).rows[0].d;
   const di = isDate(req.query.di) ? req.query.di : (last || today().slice(0, 8) + '01');
@@ -170,6 +193,7 @@ router.get('/inventaire/preparer', h(async (req, res) => {
   res.json({ di, au, dernier: last, lignes: await lignesInventaire({ query: q }, di, au) });
 }));
 
+// POST /api/inventaire : enregistre l'inventaire. Si « ajuster » est coché (admin), le stock devient la quantité réelle.
 router.post('/inventaire', h(async (req, res) => {
   const b = req.body || {};
   const di = isDate(b.di) ? b.di : today(), au = isDate(b.au) ? b.au : today();
@@ -207,6 +231,7 @@ router.post('/inventaire', h(async (req, res) => {
   res.json(out);
 }));
 
+// GET /api/inventaire/liste : un résumé par inventaire (pour la liste déroulante des bilans).
 router.get('/inventaire/liste', h(async (req, res) => {
   const r = await q(`SELECT num_inv, date_inv, MIN(heure) heure, COUNT(*) nb, SUM(ABS(qte_ecart)) ecarts, SUM(valeur_ecart) valeur_ecart,
       BOOL_OR(ajuste) ajuste, MIN(date_debut) date_debut, MAX(date_fin) date_fin, MAX(utilisateur) utilisateur
@@ -214,11 +239,13 @@ router.get('/inventaire/liste', h(async (req, res) => {
   res.json(r.rows.map((x) => ({ ...x, nb: +x.nb, ecarts: +x.ecarts, valeur_ecart: +x.valeur_ecart })));
 }));
 
+// GET /api/inventaire/detail?numero= : toutes les lignes d'un inventaire.
 router.get('/inventaire/detail', h(async (req, res) => {
   const r = await q(`SELECT * FROM "inventaire_maquis" WHERE num_inv=$1 ORDER BY lib`, [req.query.numero]);
   res.json(r.rows);
 }));
 
+// DELETE /api/inventaire?numero= : supprime un inventaire (le stock déjà ajusté n'est pas remis).
 router.delete('/inventaire', admin, h(async (req, res) => {
   const r = await q(`SELECT BOOL_OR(ajuste) a FROM "inventaire_maquis" WHERE num_inv=$1`, [req.query.numero]);
   if (r.rows[0].a && req.user.role !== 'superadmin') throw fail('Cet inventaire a ajusté le stock : seul le super administrateur peut le supprimer (le stock ne sera pas remis comme avant).');

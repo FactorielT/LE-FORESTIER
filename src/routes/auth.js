@@ -1,13 +1,31 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/routes/auth.js — CONNEXION / DÉCONNEXION / MOT DE PASSE
+   -------------------------------------------------------------------------
+   Adresses (préfixe /api) :
+     GET  /info          nom des deux établissements (écran de connexion)
+     POST /login         connexion { login, mdp, app: 'maquis' | 'resto' }
+     POST /logout        déconnexion
+     GET  /me            qui est connecté ?
+     POST /changer-app   passer d'une application à l'autre (comptes « TOUS »)
+     POST /me/password   changer son mot de passe
+
+   Comment marche la connexion :
+     le mot de passe est comparé à la version chiffrée (bcrypt) en base ;
+     si c'est bon, on crée un « jeton » (JWT) rangé dans un cookie « token ».
+     Ce jeton contient l'id, le nom, le rôle et l'application de la session.
+   ========================================================================= */
 const router = require('express').Router();
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { q } = require('../db');
 const { SECRET, roleOf, auth, h, fail, getParam } = require('../util');
 
+// GET /api/info : renvoie le nom du maquis et du restaurant (affichés sur l'écran de connexion).
 router.get('/info', h(async (req, res) => {
   res.json({ nom: (await getParam('nom_etablissement')) || 'LE REPOS DU FORESTIER', resto: (await getParam('resto_nom')) || 'RESTO DU FORESTIER' });
 }));
 
+// POST /api/login : vérifie login + mot de passe POUR L'APPLICATION CHOISIE, puis crée le cookie de session.
 router.post('/login', h(async (req, res) => {
   const { login, mdp } = req.body || {};
   const app = (req.body || {}).app === 'resto' ? 'resto' : 'maquis';
@@ -44,14 +62,17 @@ router.post('/login', h(async (req, res) => {
   res.json(payload);
 }));
 
+// POST /api/logout : supprime le cookie de session.
 router.post('/logout', (req, res) => {
   res.clearCookie('token');
   res.json({ ok: true });
 });
 
+// GET /api/me : renvoie l'utilisateur connecté (sert à savoir si la session est encore valable).
 router.get('/me', auth, (req, res) => res.json(req.user));
 
 // Super administrateur (accès aux deux applications) : changer d'application sans se reconnecter
+// POST /api/changer-app : seulement pour un compte « TOUS » (accès aux deux applications).
 router.post('/changer-app', auth, h(async (req, res) => {
   const app = (req.body || {}).app === 'resto' ? 'resto' : 'maquis';
   if (req.user.acces !== 'TOUS') throw fail("Votre compte n'a accès qu'à une seule application. Déconnectez-vous et connectez-vous avec les identifiants de l'autre application.", 403);
@@ -61,6 +82,7 @@ router.post('/changer-app', auth, h(async (req, res) => {
   res.json(payload);
 }));
 
+// POST /api/me/password : l'utilisateur change son propre mot de passe (l'ancien est demandé).
 router.post('/me/password', auth, h(async (req, res) => {
   const { ancien, nouveau } = req.body || {};
   if (!nouveau || String(nouveau).length < 4) throw fail('Le nouveau mot de passe doit contenir au moins 4 caractères.');

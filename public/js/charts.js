@@ -1,3 +1,11 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/charts.js — GRAPHIQUES (bibliothèque Chart.js)
+   -------------------------------------------------------------------------
+   Charts.combo(canvas, étiquettes, séries) : barres et/ou courbes.
+   Charts.donut(canvas, étiquettes, valeurs, couleurs) : camembert.
+   Charts.dataTable(colonnes, lignes) : tableau « Voir les données » sous un graphique.
+   Les couleurs sont dans Charts.C (s1, s2, ...).
+   ========================================================================= */
 /* Graphiques (Chart.js) : style homogène pour toute l'application */
 const Charts = (() => {
   // Palette catégorielle (ordre fixe, validée daltonisme) + couleur de marque pour une série unique
@@ -63,6 +71,7 @@ const Charts = (() => {
     });
   }
 
+  // Graphique en anneau (camembert).
   function donut(canvas, labels, data, colors, { unit = ' F' } = {}) {
     reset(canvas);
     if (!window.Chart) return null;
@@ -81,6 +90,7 @@ const Charts = (() => {
   }
 
   // Petit tableau de données sous un graphique (accessibilité)
+  // Petit tableau « Voir les données » sous un graphique.
   function dataTable(cols, rows) {
     return `<details class="chart-data"><summary>Voir les données</summary><div class="tbl-wrap auto" style="margin-top:8px"><table class="tbl">
       <thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}">${c.t}</th>`).join('')}</tr></thead>

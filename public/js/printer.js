@@ -1,3 +1,13 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/printer.js — IMPRESSION DES REÇUS DU RESTAURANT
+   -------------------------------------------------------------------------
+   Trois façons d'imprimer (réglage par appareil, page « Imprimante tickets ») :
+     - « systeme »   : la fenêtre d'impression du navigateur (imprimante installée).
+     - « bluetooth » : envoi direct à une imprimante thermique Bluetooth (Chrome).
+     - « rawbt »     : via l'application Android RawBT.
+   Pour Bluetooth / RawBT, le ticket est construit en « ESC/POS » (le langage
+   des imprimantes de tickets) dans la fonction escpos().
+   ========================================================================= */
 /* ===== Imprimante des tickets (restaurant) =====
    Réglage propre à chaque appareil (téléphone, tablette, PC), gardé dans le navigateur.
    Modes :
@@ -37,6 +47,7 @@ const Imprimante = (() => {
 
   // ---------- Logo en image noir et blanc (commande GS v 0) ----------
   let logoCache = {};
+  // Transforme le logo en image noir et blanc pour l'imprimante thermique.
   async function logoRaster(largeurPoints) {
     if (logoCache[largeurPoints] !== undefined) return logoCache[largeurPoints];
     try {
@@ -61,6 +72,7 @@ const Imprimante = (() => {
     return logoCache[largeurPoints];
   }
 
+  // Construit le ticket en langage ESC/POS (une suite d'octets envoyée à l'imprimante).
   async function escpos(t, I) {
     const logo = cfg.logo ? await logoRaster(Number(cfg.largeur) === 80 ? 224 : 176) : null;
     const W = Number(cfg.largeur) === 80 ? 48 : 32;
@@ -143,6 +155,7 @@ const Imprimante = (() => {
     device.addEventListener('gattserverdisconnected', () => { bt.car = null; }, { once: true });
     return device.name || 'Imprimante Bluetooth';
   }
+  // Ouvre la fenêtre de choix de l'imprimante Bluetooth (Chrome).
   async function choisirBluetooth() {
     if (!btDispo()) throw new Error("Le Bluetooth direct n'est pas disponible sur ce navigateur. Utilisez Google Chrome (Android ou PC), ou le mode « Application RawBT ».");
     const device = await navigator.bluetooth.requestDevice({ acceptAllDevices: true, optionalServices: SERVICES });
@@ -161,6 +174,7 @@ const Imprimante = (() => {
     }
     await choisirBluetooth();
   }
+  // Envoie le ticket par petits morceaux à l'imprimante Bluetooth.
   async function envoyerBluetooth(data) {
     await assurerBluetooth();
     const sansReponse = !!bt.car.properties.writeWithoutResponse;
@@ -177,6 +191,7 @@ const Imprimante = (() => {
   const connecte = () => !!(bt.car && bt.device && bt.device.gatt.connected);
 
   // ---------- RawBT (Android) ----------
+  // Envoie le ticket à l'application Android RawBT.
   function envoyerRawBT(data) {
     let s = ''; for (let i = 0; i < data.length; i++) s += String.fromCharCode(data[i]);
     const b64 = btoa(s);
@@ -184,6 +199,7 @@ const Imprimante = (() => {
   }
 
   // ---------- Impression du navigateur ----------
+  // Impression par la fenêtre d'impression du navigateur, au format du papier choisi.
   function imprimerSysteme(html) {
     let z = document.getElementById('print-area');
     if (!z) { z = document.createElement('div'); z.id = 'print-area'; document.body.appendChild(z); }

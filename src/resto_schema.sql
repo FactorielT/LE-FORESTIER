@@ -1,3 +1,9 @@
+-- ======================================================================= COMMENTAIRES-DEBUTANT
+-- src/resto_schema.sql — TABLES DE L'APPLICATION RESTAURANT (toutes commencent par resto_)
+-- Exécuté à chaque démarrage par src/db.js (init) : « IF NOT EXISTS » évite de recréer
+-- ce qui existe déjà. Pour ajouter une colonne, ajoutez en bas :
+--   ALTER TABLE resto_xxx ADD COLUMN IF NOT EXISTS ma_colonne BIGINT NOT NULL DEFAULT 0;
+-- =======================================================================
 -- ===== RESTO DU FORESTIER : tables du restaurant (indépendantes du maquis) =====
 
 -- Ressources suivies en stock (sac de riz, carton de poisson, poulets, charbon)

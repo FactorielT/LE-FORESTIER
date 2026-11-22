@@ -1,3 +1,14 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/css/app.css — TOUTE LA MISE EN FORME DU SITE (couleurs, tailles, mise en page)
+   -------------------------------------------------------------------------
+   - Les COULEURS principales sont des variables au début (:root { --g700: ... }).
+     Le maquis est en vert ; le restaurant redéfinit ces variables en bleu
+     (chercher « body.espace-resto »). Changer une couleur = changer la variable.
+   - Les règles « @media (max-width: ...) » adaptent l'affichage aux téléphones.
+   - Les règles « @media print » ne servent qu'à l'impression.
+   - Pour trouver le style d'un élément : clic droit sur l'élément dans Chrome →
+     « Inspecter », repérez sa classe (ex. class="kpi"), puis cherchez « .kpi » ici.
+   ========================================================================= */
 :root {
   --g900: #1b4d1f; --g800: #1f5f24; --g700: #2e7d32; --g600: #388e3c; --g500: #43a047; --g100: #e3f1e4; --g50: #f1f8f1;
   --bg: #f3f6f3; --card: #ffffff; --ink: #18221a; --ink2: #4b5a4e; --ink3: #7c8a7f; --line: #dfe6e0; --line2: #edf1ed;
@@ -641,3 +652,15 @@ button.app-card .app-go { margin-top: auto; }
 .xl td.rdel button { border: 0; background: transparent; color: var(--red); cursor: pointer; width: 30px; height: 28px; border-radius: 6px; display: inline-grid; place-items: center; }
 .xl td.rdel button:hover { background: var(--red50); }
 .xl td.rdel svg { width: 16px; height: 16px; }
+
+/* Guide d'utilisation */
+.guide-sommaire { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 6px; margin-top: 12px; }
+.guide-sommaire a { display: flex; align-items: center; gap: 10px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); text-decoration: none; font-weight: 600; font-size: 14px; background: #fff; }
+.guide-sommaire a:hover { border-color: var(--g600); background: var(--g50); }
+.guide-sommaire a span { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: var(--g600); color: #fff; font-size: 12px; flex: none; }
+.guide-sec { scroll-margin-top: calc(var(--top, 60px) + 12px); }
+.guide-sec p { margin: 0 0 8px; line-height: 1.55; }
+.guide-etapes, .guide-points { margin: 4px 0 8px; padding-left: 22px; line-height: 1.6; }
+.guide-etapes li, .guide-points li { margin: 4px 0; }
+.guide-etapes li::marker { font-weight: 800; color: var(--g700); }
+@media (max-width: 420px) { .topbar [data-home] { display: none; } }

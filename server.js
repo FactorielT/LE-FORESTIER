@@ -1,3 +1,23 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   server.js — POINT DE DÉPART DE L'APPLICATION (côté serveur)
+   -------------------------------------------------------------------------
+   C'est le fichier lancé par « npm start » (ou « node server.js »).
+   Il :
+     1. crée le serveur web Express ;
+     2. sert les fichiers du site (dossier public/ : HTML, CSS, JavaScript) ;
+     3. branche les « routes » de l'API (dossier src/routes/) : chaque route
+        répond à une adresse, par ex. GET /api/produits renvoie la liste des boissons ;
+     4. prépare la base de données (src/db.js → init) puis démarre l'écoute.
+
+   VOCABULAIRE :
+     - API : les adresses /api/... appelées par le navigateur pour lire/écrire des données.
+     - Middleware : petite fonction exécutée AVANT une route (ex. « auth » vérifie
+       que l'utilisateur est connecté).
+
+   POUR AJOUTER UN NOUVEAU FICHIER DE ROUTES :
+     créez src/routes/monfichier.js (copiez la forme d'un fichier existant),
+     puis ajoutez ici une ligne app.use('/api/...', auth, require('./src/routes/monfichier'));
+   ========================================================================= */
 process.env.TZ = process.env.TZ || 'Africa/Abidjan';
 const path = require('path');
 const express = require('express');

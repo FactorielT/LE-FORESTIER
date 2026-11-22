@@ -1,3 +1,22 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/db.js — CONNEXION À LA BASE POSTGRESQL + MISE À JOUR AUTOMATIQUE
+   -------------------------------------------------------------------------
+   - « pool » : la connexion à PostgreSQL. L'adresse est lue dans la variable
+     d'environnement DATABASE_URL (sur Render : onglet Environment). Sans elle,
+     on utilise une base locale postgres://postgres:postgres@localhost:5432/forestier.
+   - q(sql, paramètres) : exécute UNE requête SQL et renvoie le résultat.
+   - tx(fonction) : exécute PLUSIEURS requêtes dans une « transaction » :
+     soit tout est enregistré, soit rien (en cas d'erreur, tout est annulé).
+   - init() : lancé au démarrage. Il crée les tables manquantes (schema.sql,
+     resto_schema.sql) et applique les « migrations » (ajout de colonnes,
+     comptes par défaut...). Il peut être relancé sans risque : chaque
+     instruction vérifie d'abord si c'est déjà fait (IF NOT EXISTS).
+
+   POUR AJOUTER UNE COLONNE À UNE TABLE :
+     ajoutez dans la liste « migrations » une ligne du type
+       `ALTER TABLE "maTable" ADD COLUMN IF NOT EXISTS "maColonne" BIGINT DEFAULT 0`,
+     puis redémarrez : la base de Neon sera mise à jour toute seule.
+   ========================================================================= */
 const fs = require('fs');
 const path = require('path');
 const { Pool, types } = require('pg');
@@ -17,8 +36,10 @@ const pool = new Pool({
   max: 10,
 });
 
+// Exécute une requête SQL. Exemple : await q('SELECT * FROM produit WHERE rid=$1', [5])
 const q = (text, params) => pool.query(text, params);
 
+// Transaction : tout réussit ou tout est annulé. Exemple : await tx(async (c) => { await c.query(...); await c.query(...); })
 async function tx(fn) {
   const client = await pool.connect();
   try {
@@ -37,6 +58,7 @@ async function tx(fn) {
 // Tables de l'ancienne application sans clé primaire : on ajoute "rid"
 const TABLES_SANS_PK = ['appro', 'blocage', 'client', 'commande', 'histoproduit', 'lignecmde', 'numero', 'produit', 'suppression', 'VERSEMENTINTERNE'];
 
+// Lancé une fois au démarrage du serveur : crée / met à jour la base.
 async function init() {
   const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
   await q(schema);
@@ -49,6 +71,8 @@ async function init() {
     if (!r.rowCount) await q(`ALTER TABLE "${t}" ADD COLUMN IF NOT EXISTS rid BIGSERIAL PRIMARY KEY`);
   }
 
+  // Liste des mises à jour de la base. Chaque ligne est exécutée à chaque démarrage, sans danger
+  // (IF NOT EXISTS). Pour ajouter une colonne : ajoutez une ligne à la fin de cette liste.
   const migrations = [
     `ALTER TABLE "T_Utilisateur" ALTER COLUMN "mdp" TYPE VARCHAR(100)`,
     `ALTER TABLE "T_Utilisateur" ADD COLUMN IF NOT EXISTS "Application" VARCHAR(10) DEFAULT 'MAQUIS'`,
@@ -103,6 +127,7 @@ async function init() {
   if (!num.rowCount) {
     await q(`INSERT INTO "numero" ("numCli","numCmde","Numappro","numprod","MATRICU","NumInvent") VALUES ('0','0','0','0','0','0')`);
   }
+  // Valeurs par défaut des paramètres (ajoutées seulement si elles n'existent pas encore).
   const defaults = {
     nom_etablissement: 'LE REPOS DU FORESTIER',
     resto_nom: 'RESTO DU FORESTIER',

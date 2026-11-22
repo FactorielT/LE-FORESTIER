@@ -1,7 +1,15 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/routes/creances.js — MAQUIS : CRÉDITS CLIENTS (CRÉANCES)
+   -------------------------------------------------------------------------
+   Tables : client (liste des créanciers), CompteCreances (solde de chacun),
+   creancier (crédits accordés), paiement (remboursements).
+   Le solde d'un client = total de ses crédits − total de ses paiements.
+   ========================================================================= */
 const router = require('express').Router();
 const { q, tx } = require('../db');
 const { admin, h, fail, num, today, moisDe, anneeDe, isDate, nextNumero, verifierJourOuvert } = require('../util');
 
+// Retrouve (ou crée) le compte de solde d'un créancier.
 async function compte(c, nom) {
   const r = await c.query(`SELECT * FROM "CompteCreances" WHERE UPPER(TRIM("Nomprenom"))=UPPER(TRIM($1)) ORDER BY "IDCompteCreances" LIMIT 1 FOR UPDATE`, [nom]);
   if (r.rowCount) return r.rows[0];
@@ -9,6 +17,7 @@ async function compte(c, nom) {
 }
 
 // Liste des créanciers (clients) avec solde
+// Créanciers : liste, ajout, renommage, suppression, détail.
 router.get('/creanciers', h(async (req, res) => {
   const r = await q(`
     WITH noms AS (
@@ -66,6 +75,7 @@ router.get('/creanciers/detail', h(async (req, res) => {
 }));
 
 // Tableau de bord des créances
+// GET /api/creances/tableau : ce que chaque client doit encore.
 router.get('/creances/tableau', h(async (req, res) => {
   const r = await q(`SELECT MIN("IDCompteCreances") id, MIN(TRIM("Nomprenom")) nom, SUM("MontantCredit") solde FROM "CompteCreances"
     GROUP BY UPPER(TRIM("Nomprenom")) HAVING SUM("MontantCredit")<>0 ORDER BY 2`);
@@ -73,6 +83,7 @@ router.get('/creances/tableau', h(async (req, res) => {
 }));
 
 // Enregistrement de crédit
+// POST /api/credits : un client prend à crédit (son solde augmente).
 router.post('/credits', h(async (req, res) => {
   const { date, nom, montant, motif } = req.body || {};
   if (!isDate(date)) throw fail('Date du crédit invalide.');
@@ -92,6 +103,7 @@ router.post('/credits', h(async (req, res) => {
   res.json({ ok: true });
 }));
 
+// GET /api/credits : liste des crédits.
 router.get('/credits', h(async (req, res) => {
   const r = await q(`SELECT "IDcreancier" id, nomcreancier, montantcreance, motifcreance, datecreance FROM "creancier"
     WHERE datecreance BETWEEN $1 AND $2 AND ($3::text IS NULL OR UPPER(TRIM(nomcreancier))=UPPER(TRIM($3)))
@@ -99,6 +111,7 @@ router.get('/credits', h(async (req, res) => {
   res.json(r.rows);
 }));
 
+// DELETE /api/credits/:id : supprime un crédit (le solde est recalculé).
 router.delete('/credits/:id', admin, h(async (req, res) => {
   await tx(async (c) => {
     const cr = (await c.query(`DELETE FROM "creancier" WHERE "IDcreancier"=$1 RETURNING *`, [Number(req.params.id)])).rows[0];
@@ -111,6 +124,7 @@ router.delete('/credits/:id', admin, h(async (req, res) => {
 }));
 
 // Paiement des arriérés
+// POST /api/paiements : un client rembourse (son solde diminue).
 router.post('/paiements', h(async (req, res) => {
   const { date, nom, montant } = req.body || {};
   if (!isDate(date)) throw fail('Date invalide.');
@@ -130,6 +144,7 @@ router.post('/paiements', h(async (req, res) => {
   res.json(out);
 }));
 
+// GET /api/paiements : historique des remboursements.
 router.get('/paiements', h(async (req, res) => {
   const r = await q(`SELECT "IDpaiement" id, client, payer, datepaiement FROM "paiement"
     WHERE datepaiement BETWEEN $1 AND $2 AND ($3::text IS NULL OR UPPER(TRIM(client))=UPPER(TRIM($3)))
@@ -137,6 +152,7 @@ router.get('/paiements', h(async (req, res) => {
   res.json(r.rows);
 }));
 
+// DELETE /api/paiements/:id : supprime un paiement (le solde est recalculé).
 router.delete('/paiements/:id', admin, h(async (req, res) => {
   await tx(async (c) => {
     const p = (await c.query(`DELETE FROM "paiement" WHERE "IDpaiement"=$1 RETURNING *`, [Number(req.params.id)])).rows[0];

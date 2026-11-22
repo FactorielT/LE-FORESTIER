@@ -1,3 +1,8 @@
+-- ======================================================================= COMMENTAIRES-DEBUTANT
+-- src/schema.sql — TABLES DU MAQUIS, reprises de l'ancienne application WinDev (MyColoMaq).
+-- Ne modifiez pas ce fichier pour ajouter une colonne : utilisez la liste « migrations »
+-- de src/db.js (ALTER TABLE ... ADD COLUMN IF NOT EXISTS ...).
+-- =======================================================================
 -- Script généré par WINDEV Mobile le 25/10/2026 00:48:54
 -- Tables de l'analyse MyColoMaq.wda
 -- pour PostgreSQL

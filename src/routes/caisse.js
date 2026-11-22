@@ -1,8 +1,19 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/routes/caisse.js — MAQUIS : DÉPENSES ET FERMETURE DE CAISSE
+   -------------------------------------------------------------------------
+   Montant à verser aujourd'hui = vente + crédits payés − créances − dépenses
+   Versement d'hier             = montant à verser de la dernière journée fermée
+   Montant total versé ce jour  = versement d'hier + montant à verser aujourd'hui
+   La répartition Wave / OM / Espèce porte sur le montant à verser aujourd'hui.
+   En cas d'écart, un motif est obligatoire (table journal_ecart_caisse).
+   Tables : DEPENSES, DEPENSEQUOTIDIEN, VERSEMENTINTERNE, journal_ecart_caisse.
+   ========================================================================= */
 const router = require('express').Router();
 const { q, tx } = require('../db');
 const { admin, h, fail, num, today, nowTime, moisDe, anneeDe, isDate, verifierJourOuvert } = require('../util');
 
 // ---------- DÉPENSES ----------
+// Types de dépenses (table DEPENSES) : liste, ajout, suppression.
 router.get('/depenses/types', h(async (req, res) => {
   const r = await q(`SELECT "IDDEPENSES" id, TRIM("NOMDEPENSE") nom FROM "DEPENSES" WHERE COALESCE(TRIM("NOMDEPENSE"),'')<>'' ORDER BY 2`);
   res.json(r.rows);
@@ -15,11 +26,13 @@ router.post('/depenses/types', h(async (req, res) => {
   await q(`INSERT INTO "DEPENSES"("NOMDEPENSE") VALUES ($1)`, [nom]);
   res.json({ ok: true, nom });
 }));
+// DELETE /api/depenses/:id : une dépense créée par un appro ne se supprime qu'en supprimant l'appro.
 router.delete('/depenses/types/:id', admin, h(async (req, res) => {
   await q(`DELETE FROM "DEPENSES" WHERE "IDDEPENSES"=$1`, [Number(req.params.id)]);
   res.json({ ok: true });
 }));
 
+// POST /api/depenses : enregistre une dépense du jour (refusé si la caisse de ce jour est fermée).
 router.post('/depenses', h(async (req, res) => {
   const { date, depense, montant, motif } = req.body || {};
   if (!isDate(date)) throw fail('Date de dépense invalide.');
@@ -31,6 +44,7 @@ router.post('/depenses', h(async (req, res) => {
     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`, [depense, m, motif || null, req.user.nom, date, nowTime(), moisDe(date), anneeDe(date), today()]);
   res.json({ ok: true });
 }));
+// GET /api/depenses?du=&au=&depense= : historique des dépenses.
 router.get('/depenses', h(async (req, res) => {
   const r = await q(`SELECT "IDDEPENSES" id, "DEPENSE", "MONTANT", "DETAILS", "AGENTS", "DATEDEP", "HEUREDEP", "NUMAPPRO" FROM "DEPENSEQUOTIDIEN"
     WHERE "DATEDEP" BETWEEN $1 AND $2 AND ($3::text IS NULL OR "DEPENSE"=$3) ORDER BY "DATEDEP" DESC, "IDDEPENSES" DESC`,
@@ -46,6 +60,7 @@ router.delete('/depenses/:id', admin, h(async (req, res) => {
 }));
 
 // ---------- FERMETURE DE CAISSE ----------
+// Calcule tous les montants de la fermeture pour une date (voir la formule en haut du fichier).
 async function situation(c, date) {
   const one = async (sql) => Number((await c.query(sql, [date])).rows[0].t) || 0;
   // Versement d'hier = montant total à verser de la journée précédente (fermée)
@@ -65,6 +80,7 @@ async function situation(c, date) {
     totalVerseJour: caisseHier + sommes, venteExiste, numeroVente: v ? v.NumVentes : null, venteCredit, ecartCredit: venteCredit - creances };
 }
 
+// GET /api/caisse?date= : situation de la journée + fermeture déjà faite (si elle existe).
 router.get('/caisse', h(async (req, res) => {
   const date = req.query.date;
   if (!isDate(date)) throw fail('Date invalide.');
@@ -77,6 +93,8 @@ router.get('/caisse', h(async (req, res) => {
   res.json({ ...(await situation({ query: q }, date)), existe: ex.rows[0] || null, appro: { n: +ap.n, total: +ap.t }, nbDepenses: +nd.n, aFermer });
 }));
 
+// POST /api/caisse : ferme la caisse { date, wave, om, espece, motif }.
+// Vérifie : pas déjà fermée, vente enregistrée, journées précédentes fermées, motif si écart.
 router.post('/caisse', h(async (req, res) => {
   const { date } = req.body || {};
   if (!isDate(date)) throw fail('Date invalide.');
@@ -113,6 +131,7 @@ router.post('/caisse', h(async (req, res) => {
   res.json(out);
 }));
 
+// GET /api/caisse/bilan?du=&au= : liste des fermetures (Bilans fermeture caisse).
 router.get('/caisse/bilan', h(async (req, res) => {
   const r = await q(`SELECT rid id, "DATEENREG", "DATEVERSE", "MTJRCTN", "MTDEPENSES", "CREANCES", COALESCE("CREDITSPAYES",0) "CREDITSPAYES",
       "FONDSDECAISSEHIER", "SOMMES", "MTVERSER", COALESCE("BENEFICE",0) "BENEFICE",
@@ -122,6 +141,7 @@ router.get('/caisse/bilan', h(async (req, res) => {
   res.json(r.rows);
 }));
 
+// DELETE /api/caisse/:id : rouvre la caisse (seulement la dernière journée). L'écart éventuel reste dans le journal, marqué « ANNULÉ ».
 router.delete('/caisse/:id', admin, h(async (req, res) => {
   await tx(async (c) => {
     const f = (await c.query(`SELECT "DATEVERSE" FROM "VERSEMENTINTERNE" WHERE rid=$1`, [Number(req.params.id)])).rows[0];
@@ -137,6 +157,7 @@ router.delete('/caisse/:id', admin, h(async (req, res) => {
 }));
 
 // Journal des écarts de caisse (motifs)
+// GET /api/caisse/ecarts : journal des écarts de caisse et de leurs motifs.
 router.get('/caisse/ecarts', h(async (req, res) => {
   const r = await q(`SELECT * FROM "journal_ecart_caisse" WHERE date_caisse BETWEEN $1 AND $2 ORDER BY date_caisse DESC, id DESC`,
     [req.query.du || '1900-01-01', req.query.au || '2999-12-31']);

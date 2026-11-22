@@ -1,3 +1,11 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/pdf.js — BOUTON « PDF » (export des bilans)
+   -------------------------------------------------------------------------
+   Lit la page affichée (chiffres clés, graphiques, tableaux, guide) et la
+   recopie dans un PDF avec le logo, grâce aux bibliothèques jsPDF et AutoTable
+   (fichiers dans public/js/vendor/). Une page affiche le bouton PDF si elle
+   est déclarée avec « pdf: true ».
+   ========================================================================= */
 /* ===== Export PDF des bilans =====
    Construit un PDF à partir de la page affichée : en-tête avec logo, chiffres clés, graphiques et tableaux.
    Bibliothèques : jsPDF + jsPDF-AutoTable (public/js/vendor). */
@@ -9,6 +17,7 @@ const PDF = (() => {
     .replace(/[\u2713\u2714]/g, 'OK').replace(/[^\x00-\xff]/g, '').replace(/[ \t]+/g, ' ').trim();
 
   let logo = null;
+  // Charge le logo (image en haut à gauche du PDF).
   async function chargerLogo() {
     if (logo) return logo;
     const src = (document.querySelector('.sidebar .brand img') || document.querySelector('img[alt="Logo"]') || {}).src || '/img/logo.jpg';
@@ -82,12 +91,31 @@ const PDF = (() => {
     const sousTitre = (t) => { if (!t) return; place(12); doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.setTextColor(...COUL); doc.text(t, M, y); y += 5; };
 
     // ---- Blocs dans l'ordre de la page ----
-    const blocs = [...root.querySelectorAll('.kpis, .stats, .best, .a-verser, .k-hier, .kv, .repartition .field, canvas, table.tbl, .notice, .ecart')].filter(visible)
+    const blocs = [...root.querySelectorAll('.guide-sec, .kpis, .stats, .best, .a-verser, .k-hier, .kv, .repartition .field, canvas, table.tbl, .notice, .ecart')].filter(visible)
       .filter((el) => !(el.parentElement && el.parentElement.closest('table')) && !(el.matches('.kv') && el.closest('.kpis, .stats')));
     const vus = new Set();
     for (const el of blocs) {
       if ([...vus].some((v) => v.contains(el))) continue;
       vus.add(el);
+      if (el.matches('.guide-sec')) {
+        // Rubrique du guide d'utilisation : titre + paragraphes + listes
+        place(16); sousTitre(clean(el.querySelector('.card-title').textContent));
+        doc.setFont('helvetica', 'normal'); doc.setFontSize(10); doc.setTextColor(35, 35, 35);
+        const ecrire = (txt, retrait, puce) => {
+          const lignes = doc.splitTextToSize(clean(txt), W - 2 * M - retrait);
+          place(lignes.length * 4.6 + 1);
+          if (puce) doc.text(puce, M + retrait - 5, y + 3.5);
+          doc.text(lignes, M + retrait, y + 3.5); y += lignes.length * 4.6 + 1;
+        };
+        for (const n of el.querySelectorAll(':scope > p, :scope > ol > li, :scope > ul > li, :scope > .notice')) {
+          if (n.matches('.notice')) { doc.setFont('helvetica', 'bold'); ecrire('Attention : ' + n.textContent, 0); doc.setFont('helvetica', 'normal'); }
+          else if (n.parentElement.tagName === 'OL') ecrire(n.textContent, 7, ([...n.parentElement.children].indexOf(n) + 1) + '.');
+          else if (n.parentElement.tagName === 'UL') ecrire(n.textContent, 7, '-');
+          else ecrire(n.textContent, 0);
+        }
+        y += 4;
+        continue;
+      }
       if (el.matches('.kpis, .stats')) {
         const items = [...el.querySelectorAll('.kpi, .stat')].filter(visible).map((k) => {
           const small = k.querySelector('small'), b = k.querySelector('b'), sp = k.querySelector('span:not(.badge)');

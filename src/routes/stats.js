@@ -1,3 +1,9 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/routes/stats.js — MAQUIS : STATISTIQUES, BILAN PAR PRODUIT, ACCUEIL
+   -------------------------------------------------------------------------
+   Ces routes ne font que LIRE la base pour fabriquer des chiffres et des
+   séries de graphiques. Rien n'est modifié ici.
+   ========================================================================= */
 const router = require('express').Router();
 const { q } = require('../db');
 const { h, today, isDate } = require('../util');
@@ -5,6 +11,7 @@ const { h, today, isDate } = require('../util');
 const addDays = (iso, k) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + k); return d.toISOString().slice(0, 10); };
 
 // Statistiques sur une période
+// GET /api/stats?du=&au= : données de la page Statistiques (par jour, par mois, top 10, paiements, dépenses).
 router.get('/stats', h(async (req, res) => {
   const au = isDate(req.query.au) ? req.query.au : today();
   const du = isDate(req.query.du) ? req.query.du : addDays(au, -29);
@@ -55,6 +62,7 @@ router.get('/stats', h(async (req, res) => {
 }));
 
 // Bilan des ventes par produit (classement du plus vendu au moins vendu)
+// GET /api/bilans/produits?du=&au= : quantités, montants et bénéfice par boisson.
 router.get('/bilans/produits', h(async (req, res) => {
   const au = isDate(req.query.au) ? req.query.au : today();
   const du = isDate(req.query.du) ? req.query.du : au.slice(0, 8) + '01';
@@ -67,6 +75,7 @@ router.get('/bilans/produits', h(async (req, res) => {
 }));
 
 // Tableau de bord de la page d'accueil
+// GET /api/dashboard : chiffres de la page d'accueil du maquis.
 router.get('/dashboard', h(async (req, res) => {
   const d = today();
   const der = (await q(`SELECT "NumVentes", "DateVente", "TotalVentes", "Benefice" FROM "T_Ventes" ORDER BY "DateVente" DESC, "IDT_Ventes" DESC LIMIT 1`)).rows[0] || null;

@@ -1,3 +1,16 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   public/js/pages.js — LES PAGES DU MAQUIS « LE REPOS DU FORESTIER »
+   -------------------------------------------------------------------------
+   Une page = un objet Pages['/adresse'] = {
+       title: 'titre affiché en haut',
+       back:  'page où mène la flèche retour',
+       pdf:   true si le bouton PDF doit apparaître,
+       async render(el, params) { ... dessine la page dans el ... }
+   }
+   « params » contient ce qui suit le ? dans l'adresse (ex. #/ventes?date=2026-11-20).
+   Pour lire/écrire des données, les pages appellent l'API : get('/ventes'),
+   post('/ventes', {...}). Les routes correspondantes sont dans src/routes/.
+   ========================================================================= */
 /* Pages métier : accueil, ventes, stock, approvisionnements, créances, dépenses, caisse, bilans */
 const Pages = {};
 (() => {
@@ -26,6 +39,7 @@ const Pages = {};
     { r: '/bilans/appros', t: 'Bilans Approvisions', i: 'pie', c: 'c8' },
     { r: '/bilans/caisse', t: 'Bilans Fermeture de Caisse', i: 'report', c: 'c10' },
   ];
+  // PAGE D'ACCUEIL DU MAQUIS (#/) : bandeau, alertes, chiffres du mois, graphique, modules.
   Pages['/'] = {
     title: 'Accueil',
     async render(el) {
@@ -97,6 +111,7 @@ const Pages = {};
   };
 
   // ================= VENTES =================
+  // PAGE VENTE (#/ventes) : saisie du stock restant de chaque boisson pour une date.
   Pages['/ventes'] = {
     title: 'Vente', back: '/',
     async render(el, params) {
@@ -122,6 +137,7 @@ const Pages = {};
       const zone = $('#v-zone');
       $('#v-dl').textContent = 'Vente du ' + dlong(date); $('#v-dl').style.textTransform = 'none';
 
+      // Charge les données de la date choisie et affiche la saisie (ou le blocage).
       async function afficher() {
         date = $('#v-date').value || today();
         $('#v-dl').textContent = 'Vente du ' + dlong(date); $('#v-dl').style.textTransform = 'none';
@@ -269,6 +285,7 @@ const Pages = {};
         $('#v-valider').addEventListener('click', valider);
       }
 
+      // Fenêtre de saisie de la quantité restante d'une boisson.
       function saisir(p) {
         if (!p) return;
         const ex = lignes.find((l) => l.rid === p.rid);
@@ -314,6 +331,7 @@ const Pages = {};
         if (rm) rm.addEventListener('click', () => { lignes = lignes.filter((l) => l.rid !== p.rid); saveDraft(); m.close(); drawLignes(); });
       }
 
+      // Bouton « Valider la vente » : question Oui/Non puis envoi au serveur.
       async function valider() {
         const tv = sum(lignes, 'total');
         if (!(await confirm(`${modif ? `Enregistrer les modifications de la vente <b>${esc(modif.NumVentes)}</b> ?<br><br>` : 'Valider cette vente ?<br><br>'}<b>Date de la vente :</b> ${dlong(date)}<br><b>Date d'enregistrement :</b> ${dlong(modif ? modif.DATEENREG : today())}<br><br>${lignes.length} boisson(s) · Total vente <b>${money(tv)}</b>`, { title: modif ? 'Modifier la vente ?' : 'Valider la vente ?' }))) return;
@@ -337,6 +355,7 @@ const Pages = {};
   };
 
   // ================= STOCK =================
+  // PAGE STOCK (#/stock) : liste des boissons, ajout et modification.
   Pages['/stock'] = {
     title: 'Mon Stock', back: '/',
     async render(el) {
@@ -413,6 +432,7 @@ const Pages = {};
   };
 
   // ================= APPROVISIONNEMENT =================
+  // PAGE APPROVISIONNEMENT (#/appro).
   Pages['/appro'] = {
     title: 'Approvisionnement', back: '/',
     async render(el, params) {
@@ -504,6 +524,7 @@ const Pages = {};
   };
 
   // ================= CRÉANCES =================
+  // PAGES CRÉANCES : menu, crédit, paiement, tableau de bord, historique, créanciers.
   Pages['/creances'] = {
     title: 'Menu Créance', back: '/',
     render(el) {
@@ -724,6 +745,7 @@ const Pages = {};
   };
 
   // ================= DÉPENSES =================
+  // PAGE DÉPENSES (#/depenses) + historique.
   Pages['/depenses'] = {
     title: 'Enregistrement dépenses', back: '/',
     async render(el, params) {
@@ -795,6 +817,7 @@ const Pages = {};
   };
 
   // ================= FERMETURE DE CAISSE =================
+  // PAGE FERMETURE DE CAISSE (#/caisse). Les calculs sont faits par le serveur (src/routes/caisse.js).
   Pages['/caisse'] = {
     pdf: true,
     title: 'Fermeture de caisse', back: '/',
@@ -907,6 +930,7 @@ const Pages = {};
   };
 
   // ================= BILANS =================
+  // PAGES DE BILANS : ventes, détail d'une vente, approvisionnements, statistiques, fermetures.
   Pages['/bilans/ventes'] = {
     pdf: true,
     title: 'Bilans ventes', back: '/',
@@ -1031,6 +1055,7 @@ const Pages = {};
   };
 
   // ================= STATISTIQUES =================
+  // PAGE STATISTIQUES (#/stats) : graphiques sur une période.
   Pages['/stats'] = {
     pdf: true,
     title: 'Statistiques', back: '/',
@@ -1095,6 +1120,7 @@ const Pages = {};
     },
   };
 
+  // BILANS FERMETURE CAISSE + journal des écarts.
   Pages['/bilans/caisse'] = {
     pdf: true,
     title: 'Bilans Fermeture Caisse', back: '/',

@@ -1,3 +1,20 @@
+/* ========================================================================= COMMENTAIRES-DEBUTANT
+   src/routes/resto.js — TOUTE L'API DU RESTAURANT « RESTO DU FORESTIER »
+   -------------------------------------------------------------------------
+   Préfixe /api/resto. Sections (dans l'ordre du fichier) :
+     1. Articles du stock (ressources) : riz, poisson, poulet, charbon...
+     2. Plats, menus du jour, accompagnements
+     3. Carte du jour et VENTES (tickets / reçus)
+     4. Dépenses
+     5. Fermeture de caisse
+     6. Bilans et tableau de bord
+
+   Comment le stock baisse : chaque plat indique combien de « portions » d'un
+   article il consomme (table resto_plat_ressource). Ex. sac de riz = 80 plats,
+   1 plat de riz consomme 1 portion → 1/80 de sac. Tout est tracé dans
+   resto_mouvement (APPRO, VENTE, ANNULATION, FIN_SAC, AJUSTEMENT).
+   Moyens de paiement : voir MODES_PAIEMENT (ESPECE, WAVE, OM, MOMO, FLOOZ).
+   ========================================================================= */
 // ===== API de l'application RESTO DU FORESTIER (restaurant) =====
 const router = require('express').Router();
 const { q, tx } = require('../db');
@@ -9,9 +26,11 @@ const N = (v) => Number(v) || 0;
 // Moyens de paiement du restaurant
 const MODES_PAIEMENT = ['ESPECE', 'WAVE', 'OM', 'MOMO', 'FLOOZ'];
 
+// Vrai si la caisse du restaurant est fermée pour cette date.
 async function estFermee(c, date) {
   return (await c.query(`SELECT 1 FROM resto_fermeture WHERE date=$1`, [date])).rowCount > 0;
 }
+// Bloque une opération si la caisse du jour est déjà fermée.
 async function jourOuvert(c, date, quoi) {
   if (await estFermee(c, date)) throw fail(`La caisse du restaurant du ${fr(date)} est déjà fermée : impossible d'enregistrer ${quoi} à cette date.`);
 }
@@ -21,6 +40,7 @@ async function journeeAFermer(c) {
     WHERE NOT v.annulee AND NOT EXISTS (SELECT 1 FROM resto_fermeture f WHERE f.date=v.date) GROUP BY v.date ORDER BY v.date LIMIT 1`);
   return r.rows[0] || null;
 }
+// Enregistre un mouvement de stock ET met à jour le stock de l'article (unites positif = entrée, négatif = sortie).
 async function mouvement(c, m) {
   await c.query(`INSERT INTO resto_mouvement(date,heure,code,type,unites,cout,ref,agent,motif) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
     [m.date || today(), nowTime(), m.code, m.type, m.unites, m.cout || 0, m.ref || null, m.agent || null, m.motif || null]);
@@ -30,6 +50,7 @@ const SEL_RES = `SELECT code, nom, unite, portions_par_unite::float ppu, stock::
 const platsRestants = (r) => (r.ppu ? Math.floor(r.stock * r.ppu + 1e-3) : null);
 
 // ---------- Infos ----------
+// GET /api/resto/info : informations du reçu (nom, adresse, téléphone, message...).
 router.get('/info', h(async (req, res) => {
   res.json({ nom: (await getParam('resto_nom')) || 'RESTO DU FORESTIER', bloquerStock: (await getParam('resto_bloquer_stock')) !== 'non',
     adresse: (await getParam('resto_adresse')) || '', telephone: (await getParam('resto_telephone')) || '',
@@ -37,6 +58,7 @@ router.get('/info', h(async (req, res) => {
 }));
 
 // ---------- Ressources / stock ----------
+// GET /api/resto/ressources : articles du stock (actifs ; ?tous=1 pour tous).
 router.get('/ressources', h(async (req, res) => {
   // Par défaut seulement les ressources actives ; ?tous=1 pour l'écran de paramétrage
   const rows = (await q(`${SEL_RES} ${req.query.tous ? '' : 'WHERE actif'} ORDER BY ordre, nom`)).rows;
@@ -88,6 +110,7 @@ router.delete('/ressources/:code', admin, h(async (req, res) => {
   await q(`DELETE FROM resto_ressource WHERE code=$1`, [code]);
   res.json({ ok: true });
 }));
+// POST /api/resto/ressources/:code/appro : approvisionnement d'un article { unites, cout, date }.
 router.post('/ressources/:code/appro', h(async (req, res) => {
   const b = req.body || {};
   const date = isDate(b.date) ? b.date : today();
@@ -104,6 +127,7 @@ router.post('/ressources/:code/appro', h(async (req, res) => {
   res.json(out);
 }));
 // Charbon (et autres) : un sac est fini
+// POST /api/resto/ressources/:code/fin : « un sac est fini » (gestion manuelle, ex. charbon).
 router.post('/ressources/:code/fin', h(async (req, res) => {
   const b = req.body || {};
   const u = num(b.unites) || 1;
@@ -117,6 +141,7 @@ router.post('/ressources/:code/fin', h(async (req, res) => {
   res.json(out);
 }));
 // Inventaire : corriger le stock réel (administrateur)
+// POST /api/resto/ressources/:code/ajuster : inventaire, nouveau stock réel (administrateur).
 router.post('/ressources/:code/ajuster', admin, h(async (req, res) => {
   const b = req.body || {};
   const nouveau = num(b.stock);
@@ -129,6 +154,7 @@ router.post('/ressources/:code/ajuster', admin, h(async (req, res) => {
   });
   res.json({ ok: true });
 }));
+// GET /api/resto/mouvements : historique des entrées / sorties de stock.
 router.get('/mouvements', h(async (req, res) => {
   const r = await q(`SELECT m.id, to_char(m.date,'YYYY-MM-DD') date, m.heure, m.code, r.nom, r.unite, m.type, m.unites::float unites, m.cout, m.ref, m.agent, m.motif
     FROM resto_mouvement m LEFT JOIN resto_ressource r ON r.code=m.code
@@ -139,6 +165,7 @@ router.get('/mouvements', h(async (req, res) => {
 }));
 
 // ---------- Plats et menus ----------
+// Liste les plats avec, pour chacun, le stock consommé et les accompagnements proposés.
 async function platsAvecRessources(c, where = '', params = []) {
   const plats = (await c.query(`SELECT id, nom, categorie, prix, menu, actif, ordre, accomp_obligatoire, vendable_seul FROM resto_plat ${where} ORDER BY categorie, ordre, nom`, params)).rows;
   const pr = (await c.query(`SELECT plat_id, code, portions::float portions FROM resto_plat_ressource`)).rows;
@@ -147,8 +174,10 @@ async function platsAvecRessources(c, where = '', params = []) {
     ressources: pr.filter((x) => x.plat_id === p.id).map(({ code, portions }) => ({ code, portions })),
     accompagnements: pa.filter((x) => x.plat_id === p.id).map((x) => ({ id: x.accomp_id, prix: x.prix === null ? null : Number(x.prix) })) }));
 }
+// Plats : liste, ajout, modification, suppression (administrateur pour les modifications).
 router.get('/plats', h(async (req, res) => res.json(await platsAvecRessources({ query: q }))));
 
+// Crée ou modifie un plat avec ses ressources consommées et ses accompagnements.
 async function enregistrerPlat(c, id, b) {
   const nom = String(b.nom || '').trim();
   if (!nom) throw fail('Le nom du plat est obligatoire.');
@@ -187,6 +216,7 @@ router.delete('/plats/:id', admin, h(async (req, res) => {
 }));
 
 // Menu du jour (dynamique)
+// Menu du jour : plats cochés pour une date (avec prix du jour facultatif).
 router.get('/menu-jour', h(async (req, res) => {
   const date = isDate(req.query.date) ? req.query.date : today();
   const plats = await platsAvecRessources({ query: q }, `WHERE menu='jour'`);
@@ -215,6 +245,8 @@ router.post('/menu-jour/copier', h(async (req, res) => {
 }));
 
 // Carte du jour (pour la vente) : menu fixe + menu du jour, avec le nombre de plats possibles selon le stock
+// La carte proposée à la caisse pour une date : menu fixe + menu du jour + accompagnements,
+// avec le nombre de plats encore possibles selon le stock.
 async function carte(c, date) {
   const fixe = await platsAvecRessources(c, `WHERE actif AND menu='fixe'`);
   const accs = await platsAvecRessources(c, `WHERE actif AND menu='accomp'`);
@@ -239,6 +271,7 @@ async function carte(c, date) {
     ...accs.filter((a) => a.vendable_seul).map((a) => ({ ...a, source: 'accomp', dispo: dispo(a), accompagnements: [] })),
   ];
 }
+// GET /api/resto/carte?date= : la carte de la caisse.
 router.get('/carte', h(async (req, res) => {
   const date = isDate(req.query.date) ? req.query.date : today();
   const aFermer = await journeeAFermer({ query: q });
@@ -246,12 +279,16 @@ router.get('/carte', h(async (req, res) => {
 }));
 
 // ---------- Ventes (tickets) ----------
+// Relit un ticket complet (entête + lignes) pour l'afficher ou l'imprimer.
 async function ticket(c, id) {
   const v = (await c.query(`SELECT id, numero, to_char(date,'YYYY-MM-DD') date, heure, agent, client, total, mode, recu, rendu, annulee, annulee_par FROM resto_vente WHERE id=$1`, [id])).rows[0];
   if (!v) throw fail('Ticket introuvable.', 404);
   v.lignes = (await c.query(`SELECT id, parent_id, type, nom, categorie, prix, qte, total FROM resto_vente_ligne WHERE vente_id=$1 ORDER BY id`, [id])).rows;
   return v;
 }
+// POST /api/resto/ventes : encaisse un client.
+// Étapes : vérifications (journée ouverte, stock) → numéro de ticket → lignes (plats + accompagnements)
+// → sortie de stock pour chaque ressource consommée → renvoie le ticket pour le reçu.
 router.post('/ventes', h(async (req, res) => {
   const b = req.body || {};
   const date = today();
@@ -318,6 +355,7 @@ router.post('/ventes', h(async (req, res) => {
   });
   res.json(out);
 }));
+// GET /api/resto/ventes?du=&au= : liste des tickets.
 router.get('/ventes', h(async (req, res) => {
   const r = await q(`SELECT v.id, v.numero, to_char(v.date,'YYYY-MM-DD') date, v.heure, v.agent, v.client, v.total, v.mode, v.annulee,
       (SELECT COALESCE(SUM(qte),0) FROM resto_vente_ligne l WHERE l.vente_id=v.id AND l.parent_id IS NULL)::int nb_plats,
@@ -325,7 +363,9 @@ router.get('/ventes', h(async (req, res) => {
     FROM resto_vente v WHERE v.date BETWEEN $1 AND $2 ORDER BY v.date DESC, v.id DESC`, [req.query.du || today(), req.query.au || today()]);
   res.json(r.rows);
 }));
+// GET /api/resto/ventes/:id : un ticket complet.
 router.get('/ventes/:id', h(async (req, res) => res.json(await ticket({ query: q }, Number(req.params.id)))));
+// POST /api/resto/ventes/:id/annuler : annule un ticket et remet le stock (administrateur).
 router.post('/ventes/:id/annuler', admin, h(async (req, res) => {
   await tx(async (c) => {
     const v = await ticket(c, Number(req.params.id));
@@ -347,6 +387,7 @@ router.post('/depenses/types', h(async (req, res) => {
   await q(`INSERT INTO resto_depense_type(nom) VALUES ($1)`, [nom]);
   res.json({ ok: true, nom });
 }));
+// Dépenses du restaurant : ajout (journée ouverte seulement), liste, suppression.
 router.post('/depenses', h(async (req, res) => {
   const b = req.body || {};
   if (!isDate(b.date)) throw fail('Date invalide.');
@@ -372,6 +413,7 @@ router.delete('/depenses/:id', admin, h(async (req, res) => {
 }));
 
 // ---------- Fermeture de caisse ----------
+// Montants de la fermeture : ventes par mode de paiement, dépenses, montant à verser = ventes − dépenses.
 async function situation(c, date) {
   const v = (await c.query(`SELECT COUNT(*)::int n, COALESCE(SUM(total),0) t,
       COALESCE(SUM(total) FILTER (WHERE mode='ESPECE'),0) espece, COALESCE(SUM(total) FILTER (WHERE mode='WAVE'),0) wave, COALESCE(SUM(total) FILTER (WHERE mode='OM'),0) om,
@@ -384,11 +426,13 @@ async function situation(c, date) {
   return { nbTickets: v.n, totalVentes, parMode: { ESPECE: N(v.espece), WAVE: N(v.wave), OM: N(v.om), MOMO: N(v.momo), FLOOZ: N(v.flooz) }, depenses: dep, nbDepenses: nbDep,
     dernierVersement: der ? N(der.verse) : 0, aVerser: totalVentes - dep };
 }
+// GET /api/resto/caisse?date= : situation de la journée.
 router.get('/caisse', h(async (req, res) => {
   const date = isDate(req.query.date) ? req.query.date : today();
   const f = (await q(`SELECT *, to_char(date,'YYYY-MM-DD') date, to_char(date_enreg,'YYYY-MM-DD') date_enreg FROM resto_fermeture WHERE date=$1`, [date])).rows[0] || null;
   res.json({ date, ...(await situation({ query: q }, date)), existe: f, aFermer: await journeeAFermer({ query: q }) });
 }));
+// POST /api/resto/caisse : ferme la caisse { date, espece, wave, om, momo, flooz }.
 router.post('/caisse', h(async (req, res) => {
   const b = req.body || {};
   if (!isDate(b.date)) throw fail('Date invalide.');
@@ -410,6 +454,7 @@ router.post('/caisse', h(async (req, res) => {
   });
   res.json(out);
 }));
+// DELETE /api/resto/caisse/:id : rouvre la dernière journée fermée (administrateur).
 router.delete('/caisse/:id', admin, h(async (req, res) => {
   const f = (await q(`SELECT to_char(date,'YYYY-MM-DD') date FROM resto_fermeture WHERE id=$1`, [Number(req.params.id)])).rows[0];
   if (!f) throw fail('Fermeture introuvable.', 404);
@@ -418,6 +463,7 @@ router.delete('/caisse/:id', admin, h(async (req, res) => {
   await q(`DELETE FROM resto_fermeture WHERE id=$1`, [Number(req.params.id)]);
   res.json({ ok: true });
 }));
+// GET /api/resto/caisse/bilan : liste des fermetures.
 router.get('/caisse/bilan', h(async (req, res) => {
   const r = await q(`SELECT id, to_char(date,'YYYY-MM-DD') date, to_char(date_enreg,'YYYY-MM-DD') date_enreg, nb_tickets, total_ventes, depenses, a_verser,
       wave, om, espece, momo, flooz, verse, ecart, dernier_versement, agent, heure FROM resto_fermeture WHERE date BETWEEN $1 AND $2 ORDER BY date DESC`,
@@ -426,6 +472,8 @@ router.get('/caisse/bilan', h(async (req, res) => {
 }));
 
 // ---------- Bilans / statistiques ----------
+// GET /api/resto/bilan?du=&au= : tout le contenu de la page Bilans (chiffres clés, produits vendus,
+// plus vendus, point par moyen de règlement, catégories, heures, consommation du stock).
 router.get('/bilan', h(async (req, res) => {
   const au = isDate(req.query.au) ? req.query.au : today();
   const du = isDate(req.query.du) ? req.query.du : au;
@@ -477,6 +525,7 @@ router.get('/bilan', h(async (req, res) => {
     parMode: { ESPECE: N(k.espece), WAVE: N(k.wave), OM: N(k.om), MOMO: N(k.momo), FLOOZ: N(k.flooz) }, jours, top, produits, modes, modesJours: Object.values(pmj), accomps, categories: cat, heures, conso });
 }));
 
+// GET /api/resto/dashboard : chiffres de la page d'accueil du restaurant.
 router.get('/dashboard', h(async (req, res) => {
   const d = today();
   const s = await situation({ query: q }, d);
