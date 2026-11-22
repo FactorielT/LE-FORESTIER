@@ -69,7 +69,7 @@ const Imprimante = (() => {
     const txt = (s) => b.push(...encode(s));
     const ln = (s = '') => { txt(s); raw(0x0a); };
     const align = (n) => raw(0x1b, 0x61, n); // 0 gauche, 1 centre, 2 droite
-    const gras = (on) => raw(0x1b, 0x45, on ? 1 : 0);
+    const gras = () => raw(0x1b, 0x45, 1); // tout le ticket en gras (plus lisible)
     const taille = (dbl) => raw(0x1d, 0x21, dbl ? 0x11 : 0x00);
     const cut = (s, n) => (String(s).length > n ? String(s).slice(0, n) : String(s));
     const lr = (g, d) => { g = String(g); d = String(d); const sp = W - g.length - d.length; return sp >= 1 ? g + ' '.repeat(sp) + d : cut(g, W - d.length - 1) + ' ' + d; };
@@ -77,6 +77,7 @@ const Imprimante = (() => {
     const wrap = (s, n) => { const mots = String(s).split(/\s+/); const lignes = []; let cur = ''; for (const m of mots) { if ((cur + ' ' + m).trim().length > n) { if (cur) lignes.push(cur); cur = m; } else cur = (cur + ' ' + m).trim(); } if (cur) lignes.push(cur); return lignes.length ? lignes : ['']; };
 
     raw(0x1b, 0x40); // initialisation
+    raw(0x1b, 0x45, 1); // gras
     if (cfg.accents) raw(0x1b, 0x74, 0x02); // page de code PC850
     align(1);
     if (logo) { raw(...logo); raw(0x0a); }
@@ -192,19 +193,20 @@ const Imprimante = (() => {
     if (!st) { st = document.createElement('style'); st.id = 'print-page-style'; document.head.appendChild(st); }
     const mm = Number(cfg.largeur) === 80 ? 80 : 58;
     // Pas de taille de page imposée : on suit le papier du pilote (58 ou 80 mm) ; marges internes pour la zone non imprimable
-    const marge = mm === 80 ? 4 : 3, fs = mm === 80 ? 12 : 10.5;
+    const marge = mm === 80 ? 4 : 3, fs = mm === 80 ? 11.5 : 9.5;
     st.textContent = `@media print {
       @page { margin: 0; }
       html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; width: auto !important; min-width: 0 !important; }
       body.printing #print-area { width: 100%; max-width: ${mm}mm; margin: 0 auto !important; padding: 2mm ${marge}mm; box-sizing: border-box; }
       body.printing .ticket { width: 100% !important; max-width: none !important; padding: 0 !important; margin: 0 !important; border: 0 !important; box-sizing: border-box; font-size: ${fs}px !important; color: #000 !important; }
-      body.printing .ticket * { color: #000 !important; }
+      body.printing .ticket, body.printing .ticket * { color: #000 !important; font-family: 'Arial Black', 'Arial Bold', Arial, Helvetica, sans-serif !important; font-weight: 900 !important; font-style: normal !important; letter-spacing: 0 !important; }
       body.printing .tk-t { table-layout: fixed; width: 100%; font-size: ${fs - 0.5}px !important; }
       body.printing .tk-t th, body.printing .tk-t td { padding: 1px 2px 1px 0 !important; overflow-wrap: anywhere; }
-      body.printing .tk-t th:nth-child(1), body.printing .tk-t td:nth-child(1) { width: ${mm === 80 ? 9 : 11}%; }
+      body.printing .tk-t th:nth-child(1), body.printing .tk-t td:nth-child(1) { width: ${mm === 80 ? 11 : 13}%; }
       body.printing .tk-t th:nth-child(3), body.printing .tk-t td:nth-child(3) { width: ${mm === 80 ? 22 : 24}%; }
       body.printing .tk-t th:nth-child(4), body.printing .tk-t td:nth-child(4) { width: ${mm === 80 ? 24 : 27}%; padding-right: 0 !important; }
       body.printing .tk-t .r { white-space: nowrap; overflow-wrap: normal; }
+      body.printing .tk-t th { white-space: nowrap; overflow-wrap: normal; overflow: hidden; }
       body.printing .tk-t td, body.printing .tk-t th, body.printing .tk-acc td { font-size: inherit !important; }
       body.printing .tk-row { gap: 4px; }
       body.printing .tk-row > :last-child { text-align: right; overflow-wrap: anywhere; }
