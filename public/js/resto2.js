@@ -142,6 +142,7 @@
         const mv = await get(`/resto/mouvements?du=${addDays(today(), -6)}&au=${today()}`);
         el.innerHTML = `<div class="notice info">${ic('info')}<div>Le stock diminue automatiquement à chaque vente selon les plats vendus (1 sac de riz ≈ ${qty((res.find((r) => r.code === 'RIZ') || {}).ppu || 80)} plats, etc.).
           Le <b>charbon</b> se gère à la main : cliquez sur « Un sac est fini » quand un sac est terminé.</div></div>
+          ${adminOnly() ? `<div class="row" style="justify-content:flex-end;margin:-4px 0 12px"><a class="btn sm" href="#/resto/parametres">${ic('plus')} Ajouter / paramétrer un article</a></div>` : ''}
           <div class="res-grid">${res.map((r) => `<div class="res-card ${r.alerte ? 'bas' : ''}">
             <div class="rc-h"><b>${esc(r.nom)}</b>${r.alerte ? '<span class="badge red">Stock bas</span>' : '<span class="badge">OK</span>'}</div>
             <div class="rc-v">${qty(Math.round(r.stock * 100) / 100)} <small>${esc(r.unite)}(s)</small></div>
@@ -445,13 +446,18 @@
   Pages['/resto/parametres'] = {
     title: 'Paramètres du restaurant', back: '/resto', role: 'admin',
     async render(el) {
-      const [res, I] = await Promise.all([get('/resto/ressources'), get('/resto/info')]);
-      el.innerHTML = `<div class="card"><div class="card-title">${ic('box')} Ressources du stock et rendement</div>
-          <p class="muted" style="margin-top:0">Indiquez combien de plats on peut servir avec une unité. Laissez vide pour une gestion manuelle (charbon).</p>
-          <div class="tbl-wrap auto"><table class="tbl"><thead><tr><th>Ressource</th><th>Unité</th><th class="r">Plats par unité</th><th class="r">Seuil d'alerte</th><th class="r">Prix d'achat / unité</th><th></th></tr></thead><tbody>
-          ${res.map((r) => `<tr data-code="${r.code}"><td><input class="input" data-f="nom" value="${esc(r.nom)}"></td><td><input class="input" data-f="unite" value="${esc(r.unite)}" style="width:90px"></td>
+      const [res, I] = await Promise.all([get('/resto/ressources?tous=1'), get('/resto/info')]);
+      el.innerHTML = `<div class="card"><div class="card-title">${ic('box')} Articles du stock et rendement
+            <button class="btn sm" id="r-add" style="margin-left:auto">${ic('plus')} Ajouter un article</button></div>
+          <p class="muted" style="margin-top:0">Indiquez combien de plats on peut servir avec une unité. Laissez vide pour une gestion manuelle (charbon, gaz…).
+            Décochez « Actif » pour masquer un article sans perdre son historique.</p>
+          <div class="tbl-wrap auto"><table class="tbl res-tbl"><thead><tr><th>Article</th><th>Unité</th><th class="r">Plats par unité</th><th class="r">Seuil d'alerte</th><th class="r">Prix d'achat / unité</th><th class="r">Stock</th><th class="c">Actif</th><th></th></tr></thead><tbody>
+          ${res.map((r) => `<tr data-code="${esc(r.code)}" class="${r.actif ? '' : 'inactif'}"><td><input class="input" data-f="nom" value="${esc(r.nom)}" style="min-width:160px"></td><td><input class="input" data-f="unite" value="${esc(r.unite)}" style="width:90px"></td>
             <td><input class="input right" data-f="ppu" value="${r.ppu ?? ''}" placeholder="manuel" style="width:100px"></td><td><input class="input right" data-f="seuil" value="${r.seuil}" style="width:90px"></td>
-            <td><input class="input right" data-f="prix_unite" value="${r.prix_unite}" style="width:120px"></td><td><button class="btn sm" data-save>${ic('check')}</button></td></tr>`).join('')}</tbody></table></div></div>
+            <td><input class="input right" data-f="prix_unite" value="${r.prix_unite}" style="width:120px"></td>
+            <td class="r"><b>${unites(r.stock, r.unite)}</b></td>
+            <td class="c"><input type="checkbox" data-f="actif" ${r.actif ? 'checked' : ''} title="Actif"></td>
+            <td style="white-space:nowrap"><button class="btn sm" data-save title="Enregistrer">${ic('check')}</button> <button class="btn sm red" data-del title="Supprimer">${ic('trash')}</button></td></tr>`).join('')}</tbody></table></div></div>
         <div class="card"><div class="card-title">${ic('print')} Reçu de vente</div>
           <div class="grid2 stack-sm">
             <div class="field"><label>Nom du restaurant</label><input class="input" data-p="resto_nom" value="${esc(I.nom)}"></div>
@@ -461,11 +467,43 @@
             <div class="field"><label>Format du N° de reçu</label><input class="input" data-p="resto_format_ticket" value="${esc(I.format)}"><small class="muted">{AA} année, {N5} numéro sur 5 chiffres (ex : T26-00042)</small></div>
             <div class="field"><label>Vente si stock insuffisant</label><select class="input" data-p="resto_bloquer_stock"><option value="oui" ${I.bloquerStock ? 'selected' : ''}>Bloquer la vente</option><option value="non" ${I.bloquerStock ? '' : 'selected'}>Autoriser (stock négatif)</option></select></div>
           </div><div class="btn-bar"><button class="btn" id="p-save">${ic('check')} Enregistrer</button></div></div>`;
+      const recharger = () => Pages['/resto/parametres'].render(el);
       $$('[data-save]').forEach((b) => b.addEventListener('click', async () => {
-        const tr = b.closest('tr'); const v = {}; $$('[data-f]', tr).forEach((i) => (v[i.dataset.f] = i.value));
-        if (!(await confirm(`Enregistrer les paramètres de <b>${esc(v.nom)}</b> ?`))) return;
-        try { await put('/resto/ressources/' + tr.dataset.code, { ...v, manuel: v.ppu === '' }); ok('Ressource enregistrée avec succès.'); } catch (x) { err(x); }
+        const tr = b.closest('tr'); const v = {}; $$('[data-f]', tr).forEach((i) => (v[i.dataset.f] = i.type === 'checkbox' ? i.checked : i.value));
+        if (!(await confirm(`Enregistrer les paramètres de <b>${esc(v.nom)}</b> ?${v.actif ? '' : '<br><span class="muted">Article inactif : il n\'apparaîtra plus dans le stock ni dans les plats.</span>'}`))) return;
+        try { await put('/resto/ressources/' + encodeURIComponent(tr.dataset.code), { ...v, manuel: v.ppu === '' }); ok('Article enregistré avec succès.'); tr.classList.toggle('inactif', !v.actif); } catch (x) { err(x); }
       }));
+      $$('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+        const tr = b.closest('tr'); const nom = $('[data-f=nom]', tr).value;
+        if (!(await confirm(`Supprimer l'article <b>${esc(nom)}</b> ?<br><span class="muted">Possible seulement s'il n'a jamais été utilisé ; sinon, désactivez-le.</span>`, { danger: true }))) return;
+        try { await del('/resto/ressources/' + encodeURIComponent(tr.dataset.code)); ok('Article supprimé.'); recharger(); } catch (x) { err(x); }
+      }));
+      $('#r-add').addEventListener('click', () => {
+        const m = modal({ title: 'Nouvel article du stock', body: `
+          <div class="field"><label>Nom de l'article *</label><input class="input" name="nom" placeholder="ex : Carton de frites, Bidon d'huile, Sac d'attiéké"></div>
+          <div class="grid2 stack-sm">
+            <div class="field"><label>Unité *</label><input class="input" name="unite" placeholder="sac, carton, bidon, kg…" list="r-unites">
+              <datalist id="r-unites"><option>sac</option><option>carton</option><option>bidon</option><option>kg</option><option>poulet</option><option>casier</option><option>bouteille</option></datalist></div>
+            <div class="field"><label>Gestion du stock</label><select class="input" name="mode"><option value="auto">Calculée par les ventes (plats par unité)</option><option value="manuel">Manuelle (« unité finie », ex : charbon)</option></select></div>
+            <div class="field" data-ppu><label>Plats par unité *</label><input class="input" name="ppu" inputmode="decimal" placeholder="ex : 40"></div>
+            <div class="field"><label>Seuil d'alerte (unités)</label><input class="input" name="seuil" inputmode="decimal" value="1"></div>
+            <div class="field"><label>Prix d'achat / unité</label><input class="input" name="prix_unite" inputmode="numeric" placeholder="0"></div>
+            <div class="field"><label>Stock initial (unités)</label><input class="input" name="stock" inputmode="decimal" placeholder="0"></div>
+          </div>
+          <p class="muted" style="margin:4px 0 0">Ensuite, dans <b>Menus</b>, indiquez pour chaque plat combien de portions de cet article il consomme.</p>`,
+          foot: `<button class="btn sec" data-close>Annuler</button><button class="btn" data-ok>${ic('check')} Ajouter</button>` });
+        const mode = m.$('[name=mode]');
+        mode.addEventListener('change', () => m.$('[data-ppu]').classList.toggle('hidden', mode.value === 'manuel'));
+        m.$('[data-ok]').addEventListener('click', async () => {
+          const v = Object.fromEntries(['nom', 'unite', 'ppu', 'seuil', 'prix_unite', 'stock'].map((k) => [k, m.$(`[name=${k}]`).value.trim()]));
+          const manuel = mode.value === 'manuel';
+          if (!v.nom) return err("Saisissez le nom de l'article.");
+          if (!v.unite) return err("Saisissez l'unité.");
+          if (!manuel && !(n(v.ppu) > 0)) return err('Indiquez le nombre de plats par unité (ou choisissez une gestion manuelle).');
+          if (!(await confirm(`Ajouter l'article <b>${esc(v.nom)}</b> (${esc(v.unite)}) ?<br>${manuel ? 'Gestion manuelle' : `${esc(v.ppu)} plat(s) par ${esc(v.unite)}`}${n(v.stock) ? ` · stock initial ${esc(v.stock)}` : ''}`))) return;
+          try { await post('/resto/ressources', { ...v, manuel, ppu: manuel ? '' : v.ppu }); ok('Article ajouté avec succès.'); m.close(); recharger(); } catch (x) { err(x); }
+        });
+      });
       $('#p-save').addEventListener('click', async () => {
         if (!(await confirm('Enregistrer les paramètres du reçu ?'))) return;
         try { for (const i of $$('[data-p]')) await put('/admin/parametres', { cle: i.dataset.p, valeur: i.value }); window.RestoUtil.resetInfo(); ok('Paramètres enregistrés avec succès.'); } catch (x) { err(x); }

@@ -36,15 +36,54 @@ router.get('/info', h(async (req, res) => {
 
 // ---------- Ressources / stock ----------
 router.get('/ressources', h(async (req, res) => {
-  const rows = (await q(`${SEL_RES} ORDER BY ordre, nom`)).rows;
+  // Par défaut seulement les ressources actives ; ?tous=1 pour l'écran de paramétrage
+  const rows = (await q(`${SEL_RES} ${req.query.tous ? '' : 'WHERE actif'} ORDER BY ordre, nom`)).rows;
   res.json(rows.map((r) => ({ ...r, plats: platsRestants(r), alerte: r.stock <= r.seuil })));
+}));
+// Ajout d'un nouvel article / ressource de stock (administrateur)
+router.post('/ressources', admin, h(async (req, res) => {
+  const b = req.body || {};
+  const nom = String(b.nom || '').trim();
+  const unite = String(b.unite || '').trim().toLowerCase();
+  if (!nom) throw fail("Le nom de l'article est obligatoire.");
+  if (!unite) throw fail("L'unité est obligatoire (sac, carton, bidon, kg…).");
+  const ppu = b.ppu === null || b.ppu === undefined || b.ppu === '' || b.manuel ? null : num(b.ppu);
+  if (ppu !== null && ppu <= 0) throw fail('Le nombre de plats par unité doit être supérieur à 0.');
+  const stock = num(b.stock);
+  if (stock < 0) throw fail('Le stock initial ne peut pas être négatif.');
+  const out = await tx(async (c) => {
+    if ((await c.query(`SELECT 1 FROM resto_ressource WHERE UPPER(TRIM(nom))=UPPER($1)`, [nom])).rowCount) throw fail('Un article porte déjà ce nom.');
+    const base = nom.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 24) || 'ARTICLE';
+    let code = base, i = 1;
+    while ((await c.query(`SELECT 1 FROM resto_ressource WHERE code=$1`, [code])).rowCount) code = `${base.slice(0, 26)}_${++i}`;
+    const ordre = N((await c.query(`SELECT COALESCE(MAX(ordre),0)+1 o FROM resto_ressource`)).rows[0].o);
+    await c.query(`INSERT INTO resto_ressource(code,nom,unite,portions_par_unite,seuil_alerte,prix_unite,ordre,actif) VALUES ($1,$2,$3,$4,$5,$6,$7,true)`,
+      [code, nom, unite, ppu, num(b.seuil), Math.round(num(b.prix_unite)), ordre]);
+    if (stock > 0) await mouvement(c, { code, type: 'AJUSTEMENT', unites: stock, agent: req.user.nom, motif: 'Stock initial' });
+    return (await c.query(`${SEL_RES} WHERE code=$1`, [code])).rows[0];
+  });
+  res.json(out);
 }));
 router.put('/ressources/:code', admin, h(async (req, res) => {
   const b = req.body || {};
   const ppu = b.ppu === null || b.ppu === '' || b.manuel ? null : num(b.ppu);
   if (ppu !== null && ppu <= 0) throw fail('Le nombre de plats par unité doit être supérieur à 0.');
-  await q(`UPDATE resto_ressource SET nom=COALESCE($2,nom), unite=COALESCE($3,unite), portions_par_unite=$4, seuil_alerte=$5, prix_unite=$6 WHERE code=$1`,
-    [req.params.code, b.nom || null, b.unite || null, ppu, num(b.seuil), Math.round(num(b.prix_unite))]);
+  const nom = b.nom ? String(b.nom).trim() : null;
+  if (nom && (await q(`SELECT 1 FROM resto_ressource WHERE UPPER(TRIM(nom))=UPPER($1) AND code<>$2`, [nom, req.params.code])).rowCount) throw fail('Un autre article porte déjà ce nom.');
+  const r = await q(`UPDATE resto_ressource SET nom=COALESCE($2,nom), unite=COALESCE($3,unite), portions_par_unite=$4, seuil_alerte=$5, prix_unite=$6,
+      actif=COALESCE($7,actif), ordre=COALESCE($8,ordre) WHERE code=$1`,
+    [req.params.code, nom, b.unite ? String(b.unite).trim().toLowerCase() : null, ppu, num(b.seuil), Math.round(num(b.prix_unite)),
+      typeof b.actif === 'boolean' ? b.actif : null, b.ordre === undefined || b.ordre === '' ? null : Math.round(num(b.ordre))]);
+  if (!r.rowCount) throw fail('Article introuvable.', 404);
+  res.json({ ok: true });
+}));
+// Suppression : seulement si l'article n'a jamais servi ; sinon on le désactive
+router.delete('/ressources/:code', admin, h(async (req, res) => {
+  const code = req.params.code;
+  const plats = (await q(`SELECT p.nom FROM resto_plat_ressource pr JOIN resto_plat p ON p.id=pr.plat_id WHERE pr.code=$1 ORDER BY p.nom`, [code])).rows;
+  if (plats.length) throw fail(`Cet article est utilisé par : ${plats.map((x) => x.nom).join(', ')}. Retirez-le de ces plats ou désactivez-le.`);
+  if ((await q(`SELECT 1 FROM resto_mouvement WHERE code=$1 LIMIT 1`, [code])).rowCount) throw fail("Cet article a déjà des mouvements de stock : il ne peut pas être supprimé, mais vous pouvez le désactiver (il n'apparaîtra plus).");
+  await q(`DELETE FROM resto_ressource WHERE code=$1`, [code]);
   res.json({ ok: true });
 }));
 router.post('/ressources/:code/appro', h(async (req, res) => {

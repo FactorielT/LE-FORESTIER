@@ -590,3 +590,5 @@ button.app-card .app-go { margin-top: auto; }
 .inv-re.modif { border-color: var(--amber, #e09b00); background: #fff8e6; }
 @media (max-width: 699px) { .inv-re { width: 64px; } }
 .motif-ecart textarea { min-height: 70px; }
+.res-tbl tr.inactif td { opacity: .55; }
+.res-tbl tr.inactif td:last-child, .res-tbl tr.inactif td:nth-last-child(2) { opacity: 1; }
