@@ -664,3 +664,7 @@ button.app-card .app-go { margin-top: auto; }
 .guide-etapes li, .guide-points li { margin: 4px 0; }
 .guide-etapes li::marker { font-weight: 800; color: var(--g700); }
 @media (max-width: 420px) { .topbar [data-home] { display: none; } }
+.topbar .guide-btn { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 12px; border-radius: 10px; background: rgba(255,255,255,.16); font-weight: 700; font-size: 13.5px; color: #fff; }
+.topbar .guide-btn.hidden { display: none; }
+.topbar .guide-btn svg { width: 18px; height: 18px; }
+@media (max-width: 599px) { .topbar .guide-btn span { display: none; } .topbar .guide-btn { padding: 0 9px; } }

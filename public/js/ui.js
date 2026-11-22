@@ -120,24 +120,36 @@ const UI = (() => {
   }
   // Les navigateurs n'autorisent le son qu'après un clic : on « réveille » l'audio au premier clic
   ['pointerdown', 'keydown'].forEach((ev) => window.addEventListener(ev, () => { if (sonActif()) contexteAudio(); }, { once: true, capture: true }));
-  /** Joue une suite de notes : [fréquence en Hz, début en s, durée en s] */
-  function bip(notes, volume = 0.18, forme = 'sine') {
+  /** Joue une suite de notes « cloche » : [fréquence en Hz, début en s, durée en s]
+      Chaque note mélange la note principale et deux harmoniques plus aiguës et plus douces,
+      ce qui donne un son de clochette élégant qui s'éteint lentement. */
+  function bip(notes, volume = 0.16, forme = 'sine') {
     if (!sonActif()) return;
     const ctx = contexteAudio();
     if (!ctx) return;
-    const t0 = ctx.currentTime + 0.01;
+    const t0 = ctx.currentTime + 0.02;
+    // Volume général + léger filtre pour adoucir les aigus
+    const general = ctx.createGain(); general.gain.value = 1;
+    const filtre = ctx.createBiquadFilter(); filtre.type = 'lowpass'; filtre.frequency.value = 6000;
+    general.connect(filtre).connect(ctx.destination);
     for (const [freq, debut, duree] of notes) {
-      const o = ctx.createOscillator(), g = ctx.createGain();
-      o.type = forme; o.frequency.value = freq;
-      g.gain.setValueAtTime(0.0001, t0 + debut);
-      g.gain.exponentialRampToValueAtTime(volume, t0 + debut + 0.015);
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + debut + duree);
-      o.connect(g).connect(ctx.destination);
-      o.start(t0 + debut); o.stop(t0 + debut + duree + 0.05);
+      for (const [mult, part] of [[1, 1], [2, 0.28], [3, 0.08]]) {
+        const o = ctx.createOscillator(), g = ctx.createGain();
+        o.type = forme; o.frequency.value = freq * mult;
+        const v = volume * part, t = t0 + debut;
+        g.gain.setValueAtTime(0.0001, t);
+        g.gain.exponentialRampToValueAtTime(v, t + 0.012);             // attaque très courte
+        g.gain.exponentialRampToValueAtTime(v * 0.35, t + 0.25);       // premier amortissement
+        g.gain.exponentialRampToValueAtTime(0.0001, t + duree);        // longue extinction
+        o.connect(g).connect(general);
+        o.start(t); o.stop(t + duree + 0.05);
+      }
     }
   }
-  const sonSucces = () => bip([[880, 0, 0.16], [1318.5, 0.11, 0.32]]); // deux notes montantes (ding-dong)
-  const sonErreur = () => bip([[220, 0, 0.18], [175, 0.16, 0.3]], 0.16, 'triangle'); // deux notes graves
+  // Succès : arpège doux do – mi – sol – do aigu, qui résonne environ 2 secondes
+  const sonSucces = () => bip([[1046.5, 0, 1.6], [1318.5, 0.12, 1.7], [1568, 0.24, 1.8], [2093, 0.38, 1.9]], 0.11);
+  // Erreur : deux notes graves et courtes
+  const sonErreur = () => bip([[392, 0, 0.5], [311.1, 0.18, 0.7]], 0.14, 'triangle');
 
   const ok = (m) => { toast(m, 'ok'); sonSucces(); };
   const err = (e) => { toast(e && e.message ? e.message : String(e), 'err'); sonErreur(); };

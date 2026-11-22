@@ -34,6 +34,7 @@
         '<b>Changer son mot de passe</b> : icône clé en bas du menu.',
         '<b>Son après validation</b> : icône haut-parleur en haut ; touchez-la pour couper ou remettre le son.',
         '<b>PDF</b> : sur les pages de bilans, le bouton <b>PDF</b> en haut télécharge la page.',
+        '<b>Guide</b> : le bouton <b>Guide</b> en haut de l\'écran ouvre ce guide à tout moment.',
         "<b>Déconnexion</b> : bouton en haut à droite (ou en bas du menu).",
         'Chaque validation demande une confirmation <b>Oui / Non</b>, puis un message vert confirme l\'enregistrement.',
       ],
@@ -184,6 +185,7 @@
         'Icône <b>clé</b> en bas du menu : changer son mot de passe.',
         'Icône <b>haut-parleur</b> en haut : couper / remettre le son après chaque validation.',
         'Bouton <b>PDF</b> en haut des bilans : télécharger la page.',
+        'Bouton <b>Guide</b> en haut de l\'écran : ouvrir ce guide à tout moment.',
       ],
     },
     {

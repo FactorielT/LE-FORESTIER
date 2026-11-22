@@ -34,7 +34,6 @@ const App = (() => {
     { r: '/resto/depenses', t: 'Dépenses quotidiennes', i: 'wallet' },
     { r: '/resto/caisse', t: 'Fermeture de caisse', i: 'power' },
     { r: '/resto/imprimante', t: 'Imprimante tickets', i: 'print' },
-    { r: '/resto/guide', t: "Guide d'utilisation", i: 'guide' },
     { sec: 'Bilans' },
     { r: '/resto/bilans', t: 'Bilans des ventes', i: 'chart' },
     { r: '/resto/bilans/caisse', t: 'Bilans fermeture caisse', i: 'pie' },
@@ -56,7 +55,6 @@ const App = (() => {
     { r: '/depenses', t: 'Dépenses quotidiennes', i: 'wallet' },
     { r: '/caisse', t: 'Fermeture de caisse', i: 'power' },
     { r: '/inventaire', t: 'Inventaire', i: 'list' },
-    { r: '/guide', t: "Guide d'utilisation", i: 'guide' },
     { sec: 'Bilans' },
     { r: '/bilans/ventes', t: 'Bilans des ventes', i: 'chart' },
     { r: '/bilans/produits', t: 'Bilan par produit', i: 'box' },
@@ -178,6 +176,7 @@ const App = (() => {
         <header class="topbar"><button class="ib menu-btn" aria-label="Menu">${ic('menu')}</button>
           <button class="ib back-btn hidden" aria-label="Retour">${ic('back')}</button><h1 id="page-title"></h1>
           <button class="ib pdf-btn hidden" data-pdf title="Télécharger cette page en PDF">${ic('down')}<span>PDF</span></button>
+          <button class="ib guide-btn" data-guide title="Guide d'utilisation">${ic('guide')}<span>Guide</span></button>
           <button class="ib" data-son title="Son après validation : activé / coupé">${ic(UI.sonActif() ? 'son' : 'muet')}</button>
           <button class="ib" data-home title="Accueil">${ic('home')}</button>
           <button class="ib out-btn" data-logout-top title="Déconnexion">${ic('logout')}<span>Déconnexion</span></button></header>
@@ -192,6 +191,8 @@ const App = (() => {
     $('[data-logout]').addEventListener('click', deconnexion);
     $('[data-logout-top]').addEventListener('click', deconnexion);
     $('[data-home]').addEventListener('click', () => go(accueil()));
+    // Bouton « Guide » : ouvre le guide d'utilisation de l'application en cours
+    $('[data-guide]').addEventListener('click', () => go(espace === 'resto' ? '/resto/guide' : '/guide'));
     // Bouton haut-parleur : active ou coupe le son joué après chaque validation
     $('[data-son]').addEventListener('click', (e) => {
       const on = !UI.sonActif(); UI.setSon(on);
@@ -261,6 +262,7 @@ const App = (() => {
     document.title = ($('#page-title').textContent || 'Accueil') + ' · ' + (espace === 'resto' ? nomResto : nomEtab);
     $('#print-title').textContent = $('#page-title').textContent;
     $('.pdf-btn').classList.toggle('hidden', !page.pdf);
+    $('.guide-btn').classList.toggle('hidden', espace === 'portail');
     $('.back-btn').classList.toggle('hidden', path === '/' || path === '/resto' || path === '/portail');
     $$('.sidebar nav a').forEach((a) => {
       const r = a.dataset.r;
