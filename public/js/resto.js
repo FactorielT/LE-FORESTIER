@@ -3,7 +3,7 @@
   const { $, $$, esc, ic, get, post, put, del, n, money, qty, today, addDays, dfr, dlong, hm, toast, ok, err, modal, alert, confirm, table, sum, moneyInput, firstOfMonth } = UI;
   const go = (...a) => App.go(...a);
   const adminOnly = () => App.isAdmin();
-  const MODES = { ESPECE: 'Espèce', WAVE: 'Wave', OM: 'Orange Money' };
+  const MODES = { ESPECE: 'Espèces', WAVE: 'Wave', OM: 'Orange Money', MOMO: 'MoMo', FLOOZ: 'Flooz' };
   let INFO = null;
   const info = async () => (INFO = INFO || (await get('/resto/info')));
   const unites = (v, u) => `${qty(Math.round(v * 100) / 100)} ${u}${Math.abs(v) > 1 ? 's' : ''}`;
@@ -227,7 +227,7 @@
             <div class="qty"><button type="button" data-m="${l.key}" aria-label="Moins">−</button><span>${l.qte}</span><button type="button" data-p="${l.key}" aria-label="Plus">+</button></div>
             <b class="cl-t">${money(l.qte * l.prix)}</b></div>`).join('') || '<div class="empty" style="padding:16px">Touchez un plat pour l\'ajouter.</div>'}</div>
           <div class="cart-total"><span>TOTAL</span><b>${money(t)} F</b></div>
-          <div class="field" style="margin-top:10px"><label>Mode de paiement</label><div class="seg">${Object.entries(MODES).map(([k, v]) => `<button type="button" data-mode="${k}" class="${k === mode ? 'on' : ''}">${v}</button>`).join('')}</div></div>
+          <div class="field" style="margin-top:10px"><label>Mode de paiement</label><div class="seg seg-pay">${Object.entries(MODES).map(([k, v]) => `<button type="button" data-mode="${k}" class="${k === mode ? 'on' : ''}" title="${v}">${k === 'OM' ? 'OM' : v}</button>`).join('')}</div></div>
           ${mode === 'ESPECE' ? `<div class="grid2"><div class="field"><label>Montant reçu</label><input class="input right" id="c-recu" placeholder="${money(t)}"></div>
             <div class="field"><label>Monnaie à rendre</label><div class="date-chip"><b id="c-rendu">0</b></div></div></div>` : ''}
           <button class="btn lg block" id="c-val" ${panier.length ? '' : 'disabled'}>${ic('check')} Encaisser ${money(t)} F</button>

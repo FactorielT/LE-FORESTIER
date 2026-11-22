@@ -105,7 +105,7 @@ const Imprimante = (() => {
     const tot = 'TOTAL', mt = money(t.total) + ' F', w2 = Math.floor(W / 2);
     ln(tot + ' '.repeat(Math.max(1, w2 - tot.length - mt.length)) + mt);
     taille(false); gras(false);
-    const MODES = { ESPECE: 'Espèce', WAVE: 'Wave', OM: 'Orange Money' };
+    const MODES = { ESPECE: 'Espèces', WAVE: 'Wave', OM: 'Orange Money', MOMO: 'MoMo', FLOOZ: 'Flooz' };
     ln(lr('Paiement', MODES[t.mode] || t.mode || ''));
     if (t.mode === 'ESPECE') { ln(lr('Montant reçu', money(t.recu) + ' F')); ln(lr('Monnaie rendue', money(t.rendu) + ' F')); }
     if (t.annulee) { align(1); gras(true); ln('*** TICKET ANNULÉ ***'); gras(false); align(0); }

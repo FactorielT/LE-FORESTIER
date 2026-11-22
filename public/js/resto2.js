@@ -4,6 +4,8 @@
   const go = (...a) => App.go(...a);
   const adminOnly = () => App.isAdmin();
   const { unites, MODES } = window.RestoUtil;
+  // Répartition du versement à la fermeture (ordre d'affichage)
+  const PAIE = [['espece', 'Espèces'], ['wave', 'Wave'], ['om', 'Orange Money (OM)'], ['momo', 'MoMo'], ['flooz', 'Flooz']];
   const TYPES_MVT = { APPRO: 'Approvisionnement', VENTE: 'Vente', ANNULATION: 'Annulation ticket', FIN_SAC: 'Sac terminé', AJUSTEMENT: 'Ajustement inventaire' };
 
   // ================= MENUS =================
@@ -318,12 +320,12 @@
           <div class="card-title">${ic('report')} Situation de la journée</div>
           ${line('MONTANT DU DERNIER VERSEMENT', V.dv, '#888')}
           ${line(`MONTANT TOTAL VENTES DU JOUR (${V.nb} ticket${V.nb > 1 ? 's' : ''})`, V.ventes, '#7b1fe0', '+')}
-          ${!f && s.totalVentes ? `<div class="muted" style="margin:-4px 0 6px 24px">dont Espèce ${money(s.parMode.ESPECE)} · Wave ${money(s.parMode.WAVE)} · OM ${money(s.parMode.OM)}</div>` : ''}
+          ${!f && s.totalVentes ? `<div class="muted" style="margin:-4px 0 6px 24px">dont ${PAIE.filter(([k]) => s.parMode[k.toUpperCase()]).map(([k, l]) => `${l} ${money(s.parMode[k.toUpperCase()])}`).join(' · ')}</div>` : ''}
           ${line('TOTAL DÉPENSES', V.dep, '#0f8a8a', '−')}
           <div class="a-verser"><span>MONTANT TOTAL À VERSER AUJOURD'HUI</span><b>${money(V.av)}</b></div>
           <div class="card-title" style="margin-top:14px">${ic('wallet')} Répartition du versement</div>
-          <div class="repartition rep3">
-            ${['wave', 'om', 'espece'].map((k) => `<div class="field"><label>${{ wave: 'Wave', om: 'Orange Money (OM)', espece: 'Espèce' }[k]}</label>${f ? `<span class="val">${money(f[k])}</span>` : `<input class="input" id="k-${k}" ${vide ? 'disabled' : ''}>`}</div>`).join('')}
+          <div class="repartition rep5">
+            ${PAIE.map(([k, l]) => `<div class="field"><label>${l}</label>${f ? `<span class="val">${money(f[k])}</span>` : `<input class="input" id="k-${k}" ${vide ? 'disabled' : ''}>`}</div>`).join('')}
           </div>
           ${f ? '' : `<div class="row" style="justify-content:flex-end;margin:-4px 0 8px"><button class="btn sec sm" id="k-auto" ${vide ? 'disabled' : ''}>${ic('wallet')} Reste en espèces</button></div>`}
           <div class="kv"><span style="font-weight:700">TOTAL VERSÉ</span><b id="k-verse">${money(f ? f.verse : 0)}</b></div>
@@ -334,17 +336,20 @@
         const majEcart = (verse) => { const d = V.av - verse; const e = $('#k-ecart'); e.className = 'ecart ' + (d === 0 ? 'ok' : 'ko'); e.textContent = d === 0 ? '✓ Le versement correspond au montant à verser' : d > 0 ? `Écart : il manque ${money(d)}` : `Écart : excédent de ${money(-d)}`; };
         if (!f) {
           // Pré-remplissage selon les modes de paiement des tickets
-          const R = { wave: s.parMode.WAVE, om: s.parMode.OM, espece: Math.max(0, s.aVerser - s.parMode.WAVE - s.parMode.OM) };
-          const tot = () => R.wave + R.om + R.espece;
+          const R = {};
+          for (const [k] of PAIE) R[k] = k === 'espece' ? 0 : s.parMode[k.toUpperCase()] || 0;
+          const autres = () => PAIE.reduce((t, [k]) => t + (k === 'espece' ? 0 : R[k]), 0);
+          R.espece = Math.max(0, s.aVerser - autres());
+          const tot = () => PAIE.reduce((t, [k]) => t + R[k], 0);
           const inp = {};
           const maj = () => { $('#k-verse').textContent = money(tot()); majEcart(tot()); };
-          for (const k of ['wave', 'om', 'espece']) { inp[k] = moneyInput($('#k-' + k), (v) => { R[k] = v; maj(); }); inp[k].set(R[k]); }
+          for (const [k] of PAIE) { inp[k] = moneyInput($('#k-' + k), (v) => { R[k] = v; maj(); }); inp[k].set(R[k]); }
           maj();
-          $('#k-auto').addEventListener('click', () => { R.espece = Math.max(0, V.av - R.wave - R.om); inp.espece.set(R.espece); maj(); });
+          $('#k-auto').addEventListener('click', () => { R.espece = Math.max(0, V.av - autres()); inp.espece.set(R.espece); maj(); });
           $('#k-act').addEventListener('click', () => load().catch(err));
           $('#k-val').addEventListener('click', async () => {
             const d = V.av - tot();
-            if (!(await confirm(`Voulez-vous fermer la caisse du restaurant du <b>${dfr(date)}</b> ?<br><br>Montant à verser : <b>${money(V.av)}</b><br>Wave : <b>${money(R.wave)}</b> · OM : <b>${money(R.om)}</b> · Espèce : <b>${money(R.espece)}</b><br>Total versé : <b>${money(tot())}</b>
+            if (!(await confirm(`Voulez-vous fermer la caisse du restaurant du <b>${dfr(date)}</b> ?<br><br>Montant à verser : <b>${money(V.av)}</b><br>${PAIE.map(([k, l]) => `${l} : <b>${money(R[k])}</b>`).join(' · ')}<br>Total versé : <b>${money(tot())}</b>
               ${d ? `<br><span style="color:var(--red);font-weight:700">Écart de ${money(Math.abs(d))} (${d > 0 ? 'manquant' : 'excédent'})</span>` : ''}<br><br><span class="muted">Après la fermeture, aucune vente ni dépense ne pourra être enregistrée à cette date.</span>`))) return;
             try { await post('/resto/caisse', { date, ...R }); ok('Caisse fermée avec succès.'); load(); } catch (x) { err(x); }
           });
@@ -382,9 +387,11 @@
             <div id="b-best"></div>
             <div class="chart-box tall"><canvas id="b-top"></canvas></div><div id="b-top-d"></div></div>
         </div>
+        <div class="card"><div class="card-title">${ic('wallet')} Point par moyen de règlement <span class="muted" id="b-mper" style="margin-left:auto;font-weight:500;font-size:12.5px"></span></div>
+          <div class="pay-split"><div class="chart-box"><canvas id="b-mode"></canvas></div><div class="tbl-wrap auto" id="b-mode-t"></div></div>
+          <div id="b-mode-j" style="margin-top:12px"></div></div>
         <div class="stats-grid">
           <div class="card full"><div class="card-title">${ic('chart')} Ventes par jour</div><div class="chart-box"><canvas id="b-jour"></canvas></div><div id="b-jour-d"></div></div>
-          <div class="card"><div class="card-title">${ic('wallet')} Encaissements par mode de paiement</div><div class="chart-box tall"><canvas id="b-mode"></canvas></div><div id="b-mode-d"></div></div>
           <div class="card"><div class="card-title">${ic('list')} Ventes par catégorie</div><div class="tbl-wrap auto" id="b-cat"></div></div>
           <div class="card"><div class="card-title">${ic('clock')} Ventes par heure</div><div class="chart-box"><canvas id="b-h"></canvas></div></div>
           <div class="card full"><div class="card-title">${ic('plus')} Accompagnements les plus vendus</div><div class="tbl-wrap auto" id="b-acc"></div></div>
@@ -432,9 +439,24 @@
         const lab = d.jours.map((x) => x.d.slice(8, 10) + '/' + x.d.slice(5, 7));
         Charts.combo($('#b-jour'), lab, [{ label: 'Ventes', data: d.jours.map((x) => x.ca), color: Charts.C.s1 }, { label: 'Dépenses', data: d.jours.map((x) => x.depenses), color: Charts.C.s3 }]);
         $('#b-jour-d').innerHTML = Charts.dataTable([{ t: 'Date', f: (r) => dfr(r.d) }, { t: 'Tickets', r: 1, f: (r) => r.tickets }, { t: 'Ventes', r: 1, f: (r) => money(r.ca) }, { t: 'Dépenses', r: 1, f: (r) => money(r.depenses) }], d.jours);
-        const ml = Object.keys(MODES).map((x) => MODES[x]), mv = Object.keys(MODES).map((x) => d.parMode[x]);
-        Charts.donut($('#b-mode'), ml, mv, [Charts.C.s3, Charts.C.s1, Charts.C.s2]);
-        $('#b-mode-d').innerHTML = Charts.dataTable([{ t: 'Mode', f: (r) => r[0] }, { t: 'Montant', r: 1, f: (r) => money(r[1]) }], ml.map((l, i) => [l, mv[i]]));
+        // Point par moyen de règlement (jour ou période)
+        $('#b-mper').textContent = per;
+        const md = d.modes || Object.keys(MODES).map((m) => ({ mode: m, tickets: 0, total: d.parMode[m] || 0 }));
+        const COUL = [Charts.C.s3, Charts.C.s1, Charts.C.s2, Charts.C.s4, Charts.C.s7];
+        Charts.donut($('#b-mode'), md.map((x) => MODES[x.mode] || x.mode), md.map((x) => x.total), COUL);
+        const tT = sum(md, 'total'), tN = sum(md, 'tickets');
+        table($('#b-mode-t'), [
+          { t: 'Moyen de règlement', f: (r, i) => `<span class="dot" style="background:${COUL[i]}"></span><b>${esc(MODES[r.mode] || r.mode)}</b>` },
+          { t: 'Tickets', r: 1, f: (r) => r.tickets }, { t: 'Montant', r: 1, f: (r) => `<b>${money(r.total)}</b>` },
+          { t: 'Part', r: 1, f: (r) => (tT ? Math.round((r.total / tT) * 1000) / 10 + ' %' : '—') },
+        ], md, { green: 1, foot: ['Total encaissé', tN, money(tT), tT ? '100 %' : ''] });
+        const mj = d.modesJours || [];
+        $('#b-mode-j').innerHTML = mj.length > 1 ? `<div class="card-title" style="font-size:14px">${ic('list')} Détail par jour</div><div class="tbl-wrap" id="b-mode-jt"></div>` : '';
+        if (mj.length > 1) table($('#b-mode-jt'), [
+          { t: 'Date', f: (r) => `<b>${dfr(r.d)}</b>`, first: 1 }, { t: 'Tickets', r: 1, f: (r) => r.tickets },
+          ...Object.keys(MODES).map((m) => ({ t: MODES[m], r: 1, f: (r) => money(r[m] || 0) })),
+          { t: 'Total', r: 1, f: (r) => `<b>${money(r.total)}</b>` },
+        ], mj, { green: 1, foot: ['Total', sum(mj, 'tickets'), ...Object.keys(MODES).map((m) => money(sum(mj, (r) => r[m] || 0))), money(sum(mj, 'total'))] });
         table($('#b-cat'), [{ t: 'Catégorie', f: (r) => `<b>${esc(r.categorie)}</b>` }, { t: 'Plats', r: 1, f: (r) => r.qte }, { t: 'Montant', r: 1, f: (r) => money(r.ca) },
           { t: '%', r: 1, f: (r) => (k.ca ? Math.round((r.ca / k.ca) * 100) + ' %' : '') }], d.categories, { empty: 'Aucune vente.' });
         table($('#b-acc'), [{ t: 'Accompagnement', f: (r) => `<b>${esc(r.nom)}</b>` }, { t: 'Avec un plat', r: 1, f: (r) => r.avec }, { t: 'Vendu seul', r: 1, f: (r) => r.seul },
@@ -466,11 +488,11 @@
       const load = async () => {
         const rows = await get(`/resto/caisse/bilan?du=${$('[name=du]').value}&au=${$('[name=au]').value}`);
         table($('#bc'), [{ t: 'Date', f: (r) => `<b>${dfr(r.date)}</b>`, first: 1 }, { t: 'Tickets', r: 1, f: (r) => r.nb_tickets }, { t: 'Ventes', r: 1, f: (r) => money(r.total_ventes) },
-          { t: 'Dépenses', r: 1, f: (r) => money(r.depenses) }, { t: 'À verser', r: 1, f: (r) => money(r.a_verser) }, { t: 'Wave', r: 1, f: (r) => money(r.wave) }, { t: 'OM', r: 1, f: (r) => money(r.om) },
-          { t: 'Espèce', r: 1, f: (r) => money(r.espece) }, { t: 'Versé', r: 1, f: (r) => `<b>${money(r.verse)}</b>` },
+          { t: 'Dépenses', r: 1, f: (r) => money(r.depenses) }, { t: 'À verser', r: 1, f: (r) => money(r.a_verser) }, { t: 'Wave', r: 1, f: (r) => money(r.wave) }, { t: 'OM', r: 1, f: (r) => money(r.om) }, { t: 'MoMo', r: 1, f: (r) => money(r.momo) }, { t: 'Flooz', r: 1, f: (r) => money(r.flooz) },
+          { t: 'Espèces', r: 1, f: (r) => money(r.espece) }, { t: 'Versé', r: 1, f: (r) => `<b>${money(r.verse)}</b>` },
           { t: 'Écart', r: 1, f: (r) => `<b style="color:${r.ecart ? 'var(--red)' : 'inherit'}">${money(r.ecart)}</b>` }, { t: 'Heure', f: (r) => hm(r.heure) }, { t: 'Agent', f: (r) => esc(r.agent || '') }],
         rows, { green: 1, empty: 'Aucune fermeture sur la période.',
-          foot: ['Total', sum(rows, 'nb_tickets'), money(sum(rows, 'total_ventes')), money(sum(rows, 'depenses')), money(sum(rows, 'a_verser')), money(sum(rows, 'wave')), money(sum(rows, 'om')), money(sum(rows, 'espece')), money(sum(rows, 'verse')), money(sum(rows, 'ecart')), '', ''] });
+          foot: ['Total', sum(rows, 'nb_tickets'), money(sum(rows, 'total_ventes')), money(sum(rows, 'depenses')), money(sum(rows, 'a_verser')), money(sum(rows, 'wave')), money(sum(rows, 'om')), money(sum(rows, 'momo')), money(sum(rows, 'flooz')), money(sum(rows, 'espece')), money(sum(rows, 'verse')), money(sum(rows, 'ecart')), '', ''] });
         $('#bc-t').innerHTML = `<div class="stat"><small>Total versé</small><b class="n">${money(sum(rows, 'verse'))}</b></div><div class="stat"><small>Total ventes</small><b>${money(sum(rows, 'total_ventes'))}</b></div>
           <div class="stat"><small>Total dépenses</small><b class="r">${money(sum(rows, 'depenses'))}</b></div><div class="stat"><small>Total écarts</small><b class="r">${money(sum(rows, 'ecart'))}</b></div>`;
       };

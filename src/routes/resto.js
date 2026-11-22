@@ -6,6 +6,8 @@ const { admin, h, fail, num, today, nowTime, isDate, formatNumero, getParam } = 
 const fr = (d) => String(d).split('-').reverse().join('/');
 const addDays = (iso, k) => { const d = new Date(iso + 'T12:00:00'); d.setDate(d.getDate() + k); return d.toISOString().slice(0, 10); };
 const N = (v) => Number(v) || 0;
+// Moyens de paiement du restaurant
+const MODES_PAIEMENT = ['ESPECE', 'WAVE', 'OM', 'MOMO', 'FLOOZ'];
 
 async function estFermee(c, date) {
   return (await c.query(`SELECT 1 FROM resto_fermeture WHERE date=$1`, [date])).rowCount > 0;
@@ -255,7 +257,7 @@ router.post('/ventes', h(async (req, res) => {
   const date = today();
   const lignes = (b.lignes || []).filter((l) => num(l.qte) > 0);
   if (!lignes.length) throw fail('Ajoutez au moins un plat.');
-  const mode = ['ESPECE', 'WAVE', 'OM'].includes(b.mode) ? b.mode : 'ESPECE';
+  const mode = MODES_PAIEMENT.includes(b.mode) ? b.mode : 'ESPECE';
   const out = await tx(async (c) => {
     await c.query(`LOCK TABLE resto_vente IN SHARE ROW EXCLUSIVE MODE`);
     await jourOuvert(c, date, 'une vente');
@@ -372,13 +374,14 @@ router.delete('/depenses/:id', admin, h(async (req, res) => {
 // ---------- Fermeture de caisse ----------
 async function situation(c, date) {
   const v = (await c.query(`SELECT COUNT(*)::int n, COALESCE(SUM(total),0) t,
-      COALESCE(SUM(total) FILTER (WHERE mode='ESPECE'),0) espece, COALESCE(SUM(total) FILTER (WHERE mode='WAVE'),0) wave, COALESCE(SUM(total) FILTER (WHERE mode='OM'),0) om
+      COALESCE(SUM(total) FILTER (WHERE mode='ESPECE'),0) espece, COALESCE(SUM(total) FILTER (WHERE mode='WAVE'),0) wave, COALESCE(SUM(total) FILTER (WHERE mode='OM'),0) om,
+      COALESCE(SUM(total) FILTER (WHERE mode='MOMO'),0) momo, COALESCE(SUM(total) FILTER (WHERE mode='FLOOZ'),0) flooz
     FROM resto_vente WHERE date=$1 AND NOT annulee`, [date])).rows[0];
   const dep = N((await c.query(`SELECT COALESCE(SUM(montant),0) t FROM resto_depense WHERE date=$1`, [date])).rows[0].t);
   const nbDep = N((await c.query(`SELECT COUNT(*) n FROM resto_depense WHERE date=$1`, [date])).rows[0].n);
   const der = (await c.query(`SELECT verse FROM resto_fermeture WHERE date < $1 ORDER BY date DESC LIMIT 1`, [date])).rows[0];
   const totalVentes = N(v.t);
-  return { nbTickets: v.n, totalVentes, parMode: { ESPECE: N(v.espece), WAVE: N(v.wave), OM: N(v.om) }, depenses: dep, nbDepenses: nbDep,
+  return { nbTickets: v.n, totalVentes, parMode: { ESPECE: N(v.espece), WAVE: N(v.wave), OM: N(v.om), MOMO: N(v.momo), FLOOZ: N(v.flooz) }, depenses: dep, nbDepenses: nbDep,
     dernierVersement: der ? N(der.verse) : 0, aVerser: totalVentes - dep };
 }
 router.get('/caisse', h(async (req, res) => {
@@ -390,7 +393,8 @@ router.post('/caisse', h(async (req, res) => {
   const b = req.body || {};
   if (!isDate(b.date)) throw fail('Date invalide.');
   const wave = Math.round(num(b.wave)), om = Math.round(num(b.om)), espece = Math.round(num(b.espece));
-  if (wave < 0 || om < 0 || espece < 0) throw fail('Les montants ne peuvent pas être négatifs.');
+  const momo = Math.round(num(b.momo)), flooz = Math.round(num(b.flooz));
+  if (wave < 0 || om < 0 || espece < 0 || momo < 0 || flooz < 0) throw fail('Les montants ne peuvent pas être négatifs.');
   const out = await tx(async (c) => {
     await c.query(`LOCK TABLE resto_fermeture IN SHARE ROW EXCLUSIVE MODE`);
     if (await estFermee(c, b.date)) throw fail('La caisse de cette date est déjà fermée.');
@@ -398,10 +402,10 @@ router.post('/caisse', h(async (req, res) => {
     if (af && af.date < b.date) throw fail(`Fermez d'abord la caisse du ${fr(af.date)}.`);
     const s = await situation(c, b.date);
     if (!s.nbTickets && !s.nbDepenses) throw fail("Aucune vente ni dépense pour cette date : rien à fermer.");
-    const verse = wave + om + espece;
-    await c.query(`INSERT INTO resto_fermeture(date,nb_tickets,total_ventes,depenses,a_verser,wave,om,espece,verse,ecart,dernier_versement,agent,heure,date_enreg)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-    [b.date, s.nbTickets, s.totalVentes, s.depenses, s.aVerser, wave, om, espece, verse, s.aVerser - verse, s.dernierVersement, req.user.nom, nowTime(), today()]);
+    const verse = wave + om + espece + momo + flooz;
+    await c.query(`INSERT INTO resto_fermeture(date,nb_tickets,total_ventes,depenses,a_verser,wave,om,espece,momo,flooz,verse,ecart,dernier_versement,agent,heure,date_enreg)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)`,
+    [b.date, s.nbTickets, s.totalVentes, s.depenses, s.aVerser, wave, om, espece, momo, flooz, verse, s.aVerser - verse, s.dernierVersement, req.user.nom, nowTime(), today()]);
     return { ...s, verse, ecart: s.aVerser - verse };
   });
   res.json(out);
@@ -416,7 +420,7 @@ router.delete('/caisse/:id', admin, h(async (req, res) => {
 }));
 router.get('/caisse/bilan', h(async (req, res) => {
   const r = await q(`SELECT id, to_char(date,'YYYY-MM-DD') date, to_char(date_enreg,'YYYY-MM-DD') date_enreg, nb_tickets, total_ventes, depenses, a_verser,
-      wave, om, espece, verse, ecart, dernier_versement, agent, heure FROM resto_fermeture WHERE date BETWEEN $1 AND $2 ORDER BY date DESC`,
+      wave, om, espece, momo, flooz, verse, ecart, dernier_versement, agent, heure FROM resto_fermeture WHERE date BETWEEN $1 AND $2 ORDER BY date DESC`,
   [req.query.du || '1900-01-01', req.query.au || '2999-12-31']);
   res.json(r.rows);
 }));
@@ -427,9 +431,18 @@ router.get('/bilan', h(async (req, res) => {
   const du = isDate(req.query.du) ? req.query.du : au;
   const P = [du, au];
   const k = (await q(`SELECT COUNT(*)::int tickets, COALESCE(SUM(total),0) ca,
-      COALESCE(SUM(total) FILTER (WHERE mode='ESPECE'),0) espece, COALESCE(SUM(total) FILTER (WHERE mode='WAVE'),0) wave, COALESCE(SUM(total) FILTER (WHERE mode='OM'),0) om
+      COALESCE(SUM(total) FILTER (WHERE mode='ESPECE'),0) espece, COALESCE(SUM(total) FILTER (WHERE mode='WAVE'),0) wave, COALESCE(SUM(total) FILTER (WHERE mode='OM'),0) om,
+      COALESCE(SUM(total) FILTER (WHERE mode='MOMO'),0) momo, COALESCE(SUM(total) FILTER (WHERE mode='FLOOZ'),0) flooz
     FROM resto_vente WHERE date BETWEEN $1 AND $2 AND NOT annulee`, P)).rows[0];
   const plats = N((await q(`SELECT COALESCE(SUM(l.qte),0) n FROM resto_vente_ligne l JOIN resto_vente v ON v.id=l.vente_id WHERE v.date BETWEEN $1 AND $2 AND NOT v.annulee AND l.parent_id IS NULL`, P)).rows[0].n);
+  // Point par moyen de règlement : totaux de la période et détail par jour
+  const parModeT = (await q(`SELECT mode, COUNT(*)::int tickets, COALESCE(SUM(total),0) total FROM resto_vente
+    WHERE date BETWEEN $1 AND $2 AND NOT annulee GROUP BY mode`, P)).rows;
+  const modes = MODES_PAIEMENT.map((m) => { const r = parModeT.find((x) => x.mode === m) || {}; return { mode: m, tickets: N(r.tickets), total: N(r.total) }; });
+  const modesJours = (await q(`SELECT to_char(date,'YYYY-MM-DD') d, mode, COUNT(*)::int tickets, SUM(total) total FROM resto_vente
+    WHERE date BETWEEN $1 AND $2 AND NOT annulee GROUP BY 1, 2 ORDER BY 1 DESC`, P)).rows;
+  const pmj = {};
+  for (const r of modesJours) { const x = pmj[r.d] = pmj[r.d] || { d: r.d, tickets: 0, total: 0 }; x[r.mode] = N(r.total); x.tickets += N(r.tickets); x.total += N(r.total); }
   const dep = N((await q(`SELECT COALESCE(SUM(montant),0) t FROM resto_depense WHERE date BETWEEN $1 AND $2`, P)).rows[0].t);
   const appro = N((await q(`SELECT COALESCE(SUM(cout),0) t FROM resto_mouvement WHERE type='APPRO' AND date BETWEEN $1 AND $2`, P)).rows[0].t);
   const jours = (await q(`WITH d AS (SELECT generate_series($1::date,$2::date,'1 day')::date d)
@@ -461,7 +474,7 @@ router.get('/bilan', h(async (req, res) => {
     FROM resto_ressource r LEFT JOIN resto_mouvement m ON m.code=r.code AND m.date BETWEEN $1 AND $2 GROUP BY r.code, r.nom, r.unite, r.portions_par_unite, r.ordre ORDER BY r.ordre`, P)).rows
     .map((r) => ({ ...r, cout: N(r.cout) }));
   res.json({ du, au, kpi: { tickets: k.tickets, ca: N(k.ca), plats, panier: k.tickets ? Math.round(N(k.ca) / k.tickets) : 0, depenses: dep, appro, net: N(k.ca) - dep },
-    parMode: { ESPECE: N(k.espece), WAVE: N(k.wave), OM: N(k.om) }, jours, top, produits, accomps, categories: cat, heures, conso });
+    parMode: { ESPECE: N(k.espece), WAVE: N(k.wave), OM: N(k.om), MOMO: N(k.momo), FLOOZ: N(k.flooz) }, jours, top, produits, modes, modesJours: Object.values(pmj), accomps, categories: cat, heures, conso });
 }));
 
 router.get('/dashboard', h(async (req, res) => {

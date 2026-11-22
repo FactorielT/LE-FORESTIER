@@ -150,3 +150,7 @@ WHERE NOT EXISTS (SELECT 1 FROM resto_plat WHERE menu='accomp');
 INSERT INTO resto_plat_ressource (plat_id, code, portions)
 SELECT id, 'RIZ', 1 FROM resto_plat WHERE menu='accomp' AND nom='Portion de riz'
 ON CONFLICT DO NOTHING;
+
+-- v17 : moyens de paiement MoMo et Flooz
+ALTER TABLE resto_fermeture ADD COLUMN IF NOT EXISTS momo BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE resto_fermeture ADD COLUMN IF NOT EXISTS flooz BIGINT NOT NULL DEFAULT 0;

@@ -624,3 +624,13 @@ button.app-card .app-go { margin-top: auto; }
   body.printing .print-head { display: none; }
 }
 .tk-logo { display: block; width: 64px; height: 64px; object-fit: contain; margin: 0 auto 6px; }
+.repartition.rep5 { grid-template-columns: repeat(auto-fit, minmax(104px, 1fr)); }
+.seg.seg-pay { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); }
+.seg.seg-pay button { padding: 0 4px; font-size: 13px; }
+@media (max-width: 359px) { .seg.seg-pay { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.seg { flex-wrap: wrap; }
+.pay-split { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.3fr); gap: 16px; align-items: center; }
+.pay-split .chart-box { height: 240px; }
+.dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
+@media (max-width: 799px) { .pay-split { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 599px) { .topbar .pdf-btn span { display: none; } .topbar .pdf-btn { padding: 0 10px; } }
