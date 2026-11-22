@@ -14,7 +14,7 @@ const UI = (() => {
     let data = null;
     try { data = await r.json(); } catch { data = null; }
     if (r.status === 401 && !url.startsWith('/login')) { App.logout(true); throw new Error((data && data.error) || 'Session expirée'); }
-    if (!r.ok) throw new Error((data && data.error) || 'Erreur ' + r.status);
+    if (!r.ok) { const e = new Error((data && data.error) || 'Erreur ' + r.status); e.status = r.status; throw e; }
     return data;
   }
   const get = (u) => api(u);

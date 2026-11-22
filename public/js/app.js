@@ -25,7 +25,7 @@ const App = (() => {
     { sec: 'Administration', role: 'admin' },
     { r: '/resto/parametres', t: 'Paramètres restaurant', i: 'gear', role: 'admin' },
     { r: '/admin', t: 'Administration', i: 'users', role: 'admin' },
-    { r: '/admin/explorer', t: 'Explorateur BD', i: 'db', role: 'superadmin' },
+    { r: '/admin/explorer', t: 'Tables de la BD', i: 'db', role: 'superadmin' },
   ];
 
   const NAV = [
@@ -47,7 +47,7 @@ const App = (() => {
     { sec: 'Administration', role: 'admin' },
     { r: '/admin', t: 'Administration', i: 'gear', role: 'admin' },
     { r: '/admin/import', t: 'Importation données', i: 'upload', role: 'superadmin' },
-    { r: '/admin/explorer', t: 'Explorateur BD', i: 'db', role: 'superadmin' },
+    { r: '/admin/explorer', t: 'Tables de la BD', i: 'db', role: 'superadmin' },
   ];
 
   const isAdmin = () => user && (user.role === 'admin' || user.role === 'superadmin');

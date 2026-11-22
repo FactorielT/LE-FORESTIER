@@ -226,7 +226,7 @@ table.tbl { width: 100%; border-collapse: separate; border-spacing: 0; font-size
 .ecart.ko { background: var(--red50); color: var(--red); }
 
 /* ---------- Explorateur (grille Excel) ---------- */
-.xl-layout { display: grid; grid-template-columns: 230px minmax(0,1fr); gap: 14px; align-items: start; }
+.xl-layout { display: grid; grid-template-columns: 260px minmax(0,1fr); gap: 14px; align-items: start; }
 @media (max-width: 899px) { .xl-layout { grid-template-columns: 1fr; } .xl-tables { display: none; } }
 .xl-tables { background: #fff; border-radius: 12px; box-shadow: var(--shadow); padding: 6px; max-height: 78vh; overflow: auto; position: sticky; top: calc(var(--top) + 12px); }
 .xl-tables a { display: flex; justify-content: space-between; gap: 6px; padding: 8px 10px; border-radius: 8px; font-size: 13.5px; cursor: pointer; }
@@ -634,3 +634,10 @@ button.app-card .app-go { margin-top: auto; }
 .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 8px; vertical-align: middle; }
 @media (max-width: 799px) { .pay-split { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 599px) { .topbar .pdf-btn span { display: none; } .topbar .pdf-btn { padding: 0 10px; } }
+.xl-tables a span { display: flex; flex-direction: column; min-width: 0; }
+.xl-tables a span em { font-style: normal; font-size: 11px; opacity: .6; font-family: ui-monospace, monospace; overflow: hidden; text-overflow: ellipsis; }
+.xl-sec { margin: 10px 8px 4px; font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .4px; color: var(--ink2); }
+.xl td.rdel, .xl th.rdel { position: sticky; right: 0; background: #fff; width: 38px; text-align: center; padding: 0 4px; border-left: 1px solid var(--line); }
+.xl td.rdel button { border: 0; background: transparent; color: var(--red); cursor: pointer; width: 30px; height: 28px; border-radius: 6px; display: inline-grid; place-items: center; }
+.xl td.rdel button:hover { background: var(--red50); }
+.xl td.rdel svg { width: 16px; height: 16px; }

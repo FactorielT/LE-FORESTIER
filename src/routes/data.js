@@ -27,13 +27,29 @@ async function tablesMeta() {
   for (const x of pk.rows) if (meta[x.t]) meta[x.t].pk = x.col;
   return meta;
 }
-async function getTable(name) {
+// Chaque application a ses propres tables : resto_* pour le restaurant, les autres pour le maquis.
+// Les tables communes (utilisateurs, groupes, paramètres, blocage) sont visibles dans les deux.
+const COMMUNES = ['T_Utilisateur', 'T_Groupe', 'parametres', 'blocage'];
+const appDe = (req) => (req && req.user && req.user.app === 'resto' ? 'resto' : 'maquis');
+const dansApp = (name, app) => COMMUNES.includes(name) || (app === 'resto' ? name.startsWith('resto_') : !name.startsWith('resto_'));
+async function getTable(name, req) {
   const meta = await tablesMeta();
   const t = meta[name];
   if (!t) throw fail('Table inconnue : ' + name, 404);
+  if (req && !dansApp(name, appDe(req))) throw fail(`La table ${name} appartient à l'autre application.`, 403);
   return t;
 }
 const qi = (s) => '"' + String(s).replace(/"/g, '""') + '"';
+// Messages clairs pour les erreurs PostgreSQL les plus courantes
+async function exec(text, params) {
+  try { return await q(text, params); } catch (e) {
+    if (e.code === '23502') throw fail(`La colonne « ${e.column} » est obligatoire : remplissez-la.`);
+    if (e.code === '23503') throw fail(`Impossible : cette ligne est liée à d'autres données (${e.table || ''}${e.constraint ? ', ' + e.constraint : ''}). Supprimez ou modifiez d'abord les lignes qui l'utilisent.`);
+    if (e.code === '23505') throw fail(`Cette valeur existe déjà (doublon interdit${e.constraint ? ' : ' + e.constraint : ''}).`);
+    if (e.code === '22P02' || e.code === '22007' || e.code === '22008' || e.code === '22003') throw fail(`Valeur invalide pour cette colonne : ${e.message}`);
+    throw e;
+  }
+}
 
 // ---------- Conversion des valeurs ----------
 function pad(n) { return String(n).padStart(2, '0'); }
@@ -104,15 +120,17 @@ async function resetSequences(client) {
 router.get('/tables', h(async (req, res) => {
   const meta = await tablesMeta();
   const out = [];
+  const app = appDe(req);
   for (const t of Object.values(meta)) {
+    if (!dansApp(t.name, app)) continue;
     const n = (await q(`SELECT COUNT(*)::int n FROM ${qi(t.name)}`)).rows[0].n;
-    out.push({ name: t.name, rows: n, pk: t.pk, columns: t.columns.length });
+    out.push({ name: t.name, rows: n, pk: t.pk, columns: t.columns.length, commune: COMMUNES.includes(t.name) });
   }
   res.json(out.sort((a, b) => a.name.localeCompare(b.name, 'fr', { sensitivity: 'base' })));
 }));
 
 router.get('/table/:name', h(async (req, res) => {
-  const t = await getTable(req.params.name);
+  const t = await getTable(req.params.name, req);
   const size = Math.min(Math.max(parseInt(req.query.size, 10) || 100, 10), 1000);
   const page = Math.max(parseInt(req.query.page, 10) || 1, 1);
   const cols = t.columns;
@@ -131,7 +149,7 @@ router.get('/table/:name', h(async (req, res) => {
 }));
 
 router.put('/table/:name/row', h(async (req, res) => {
-  const t = await getTable(req.params.name);
+  const t = await getTable(req.params.name, req);
   if (!t.pk) throw fail('Cette table n\'a pas de clé primaire : modification impossible.');
   const { pk, values } = req.body || {};
   const sets = [], params = [];
@@ -143,7 +161,7 @@ router.put('/table/:name/row', h(async (req, res) => {
   }
   if (!sets.length) return res.json({ ok: true });
   params.push(pk);
-  const r = await q(`UPDATE ${qi(t.name)} SET ${sets.join(',')} WHERE ${qi(t.pk)}=$${params.length} RETURNING *`, params);
+  const r = await exec(`UPDATE ${qi(t.name)} SET ${sets.join(',')} WHERE ${qi(t.pk)}=$${params.length} RETURNING *`, params);
   if (!r.rowCount) throw fail('Ligne introuvable.', 404);
   const row = r.rows[0];
   for (const c of t.columns) if (c.type === 'bytea' && row[c.name]) row[c.name] = '[binaire]';
@@ -151,7 +169,7 @@ router.put('/table/:name/row', h(async (req, res) => {
 }));
 
 router.post('/table/:name/row', h(async (req, res) => {
-  const t = await getTable(req.params.name);
+  const t = await getTable(req.params.name, req);
   const values = (req.body || {}).values || {};
   const cols = [], params = [];
   for (const c of t.columns) {
@@ -164,28 +182,42 @@ router.post('/table/:name/row', h(async (req, res) => {
   const sql = cols.length
     ? `INSERT INTO ${qi(t.name)} (${cols.join(',')}) VALUES (${params.map((_, i) => '$' + (i + 1)).join(',')}) RETURNING *`
     : `INSERT INTO ${qi(t.name)} DEFAULT VALUES RETURNING *`;
-  const r = await q(sql, params);
+  const r = await exec(sql, params);
   res.json(r.rows[0]);
 }));
 
 router.post('/table/:name/delete', h(async (req, res) => {
-  const t = await getTable(req.params.name);
+  const t = await getTable(req.params.name, req);
   if (!t.pk) throw fail('Cette table n\'a pas de clé primaire.');
   const ids = (req.body || {}).ids || [];
   if (!ids.length) return res.json({ deleted: 0 });
-  const r = await q(`DELETE FROM ${qi(t.name)} WHERE ${qi(t.pk)}::text = ANY($1::text[])`, [ids.map(String)]);
+  // Lignes d'autres tables qui dépendent de celles-ci (supprimées en cascade ou bloquantes)
+  const refs = (await q(`SELECT c.conrelid::regclass::text tbl, a.attname col, fa.attname fcol, c.confdeltype del
+    FROM pg_constraint c JOIN pg_attribute a ON a.attrelid=c.conrelid AND a.attnum=c.conkey[1]
+    JOIN pg_attribute fa ON fa.attrelid=c.confrelid AND fa.attnum=c.confkey[1]
+    WHERE c.contype='f' AND c.confrelid=$1::regclass AND array_length(c.conkey,1)=1`, [qi(t.name)])).rows;
+  if (!(req.body || {}).force && refs.length) {
+    const vals = (await q(`SELECT ${refs.map((x, i) => `${qi(x.fcol)}::text v${i}`).join(',')} FROM ${qi(t.name)} WHERE ${qi(t.pk)}::text = ANY($1::text[])`, [ids.map(String)])).rows;
+    const lies = [];
+    for (const [i, x] of refs.entries()) {
+      const n = (await q(`SELECT COUNT(*)::int n FROM ${x.tbl} WHERE ${qi(x.col)}::text = ANY($1::text[])`, [vals.map((v) => v['v' + i]).filter((v) => v !== null)])).rows[0].n;
+      if (n) lies.push(`${x.tbl.replace(/"/g, '')} : ${n} ligne(s)${x.del === 'c' ? ' (seront aussi supprimées)' : ''}`);
+    }
+    if (lies.length) { const e = fail(`Attention, cette ligne est utilisée ailleurs :\n• ${lies.join('\n• ')}`, 409); e.lies = lies; throw e; }
+  }
+  const r = await exec(`DELETE FROM ${qi(t.name)} WHERE ${qi(t.pk)}::text = ANY($1::text[])`, [ids.map(String)]);
   res.json({ deleted: r.rowCount });
 }));
 
 router.post('/table/:name/vider', h(async (req, res) => {
-  const t = await getTable(req.params.name);
-  await q(`DELETE FROM ${qi(t.name)}`);
+  const t = await getTable(req.params.name, req);
+  await exec(`DELETE FROM ${qi(t.name)}`);
   res.json({ ok: true });
 }));
 
 // Export : une table en CSV ou toute la base en Excel (sauvegarde)
 router.get('/export/:name.csv', h(async (req, res) => {
-  const t = await getTable(req.params.name);
+  const t = await getTable(req.params.name, req);
   const cols = t.columns.filter((c) => c.type !== 'bytea');
   const rows = (await q(`SELECT ${cols.map((c) => qi(c.name)).join(',')} FROM ${qi(t.name)} ORDER BY 1`)).rows;
   const esc = (v) => (v === null || v === undefined ? '' : /[;"\n\r]/.test(String(v)) ? '"' + String(v).replace(/"/g, '""') + '"' : String(v));

@@ -17,7 +17,7 @@
         ]),
         ...(App.isSuper() ? [
           { r: '/admin/import', t: 'Importation des données', i: 'upload', c: 'c2' },
-          { r: '/admin/explorer', t: 'Explorateur de la BD', i: 'db', c: 'c7' },
+          { r: '/admin/explorer', t: App.user.app === 'resto' ? 'Tables de la BD (restaurant)' : 'Tables de la BD (maquis)', i: 'db', c: 'c7' },
         ] : []),
       ];
       el.innerHTML = `<div class="tiles" style="grid-template-columns:repeat(auto-fill,minmax(150px,1fr))">${t.map((x) => `<a class="tile" href="#${x.r}"><div class="ic ${x.c}">${ic(x.i)}</div><b>${x.t}</b></a>`).join('')}</div>
@@ -252,10 +252,23 @@
   };
 
   // ---------- EXPLORATEUR DE LA BD (grille type Excel) ----------
+  // Libellés lisibles des tables
+  const LIB = {
+    produit: 'Articles / stock des boissons', appro: 'Approvisionnements', T_Ventes: 'Ventes (une ligne par jour)', T_Inventaire: 'Lignes des ventes par boisson',
+    inventaire_maquis: 'Inventaires physiques', client: 'Créanciers (clients)', CompteCreances: 'Soldes des créanciers', creancier: 'Crédits accordés', paiement: 'Paiements des crédits',
+    DEPENSES: 'Types de dépenses', DEPENSEQUOTIDIEN: 'Dépenses quotidiennes', VERSEMENTINTERNE: 'Fermetures de caisse', journal_ecart_caisse: 'Journal des écarts de caisse',
+    numero: 'Compteurs des numéros', Fournisseur: 'Fournisseurs', T_Utilisateur: 'Utilisateurs', T_Groupe: 'Groupes d\'utilisateurs', parametres: 'Paramètres', blocage: 'Blocage de l\'application',
+    resto_ressource: 'Articles du stock (riz, poisson…)', resto_plat: 'Plats, boissons et accompagnements', resto_plat_ressource: 'Consommation de stock par plat', resto_plat_accomp: 'Accompagnements proposés par plat',
+    resto_menu_jour: 'Menus du jour', resto_vente: 'Tickets de vente', resto_vente_ligne: 'Lignes des tickets', resto_mouvement: 'Mouvements de stock', resto_depense_type: 'Types de dépenses',
+    resto_depense: 'Dépenses quotidiennes', resto_fermeture: 'Fermetures de caisse',
+  };
   Pages['/admin/explorer'] = {
-    title: 'Explorateur de la BD', back: '/admin', role: 'superadmin',
+    pdf: false,
+    title: () => (App.user.app === 'resto' ? 'Tables de la BD — Restaurant' : 'Tables de la BD — Maquis'), back: '/admin', role: 'superadmin',
     async render(el, params) {
       const tables = await get('/data/tables');
+      // Tables propres à l'application d'abord, tables communes ensuite
+      tables.sort((a, b) => (a.commune === b.commune ? 0 : a.commune ? 1 : -1));
       let cur = params.t || (tables[0] && tables[0].name);
       let st = { page: 1, size: 100, search: '', sort: '', dir: 'asc' };
       let data = null;
@@ -273,8 +286,9 @@
           <div class="tbl-wrap tall" id="x-grid"></div>
           <div class="pager" id="x-pager"></div></div></div>`;
       const drawList = () => {
-        $('#x-list').innerHTML = tables.map((t) => `<a data-t="${esc(t.name)}" class="${t.name === cur ? 'active' : ''}"><span>${esc(t.name)}</span><small>${t.rows}</small></a>`).join('');
-        $('#x-sel').innerHTML = tables.map((t) => `<option ${t.name === cur ? 'selected' : ''} value="${esc(t.name)}">${esc(t.name)} (${t.rows})</option>`).join('');
+        let vu = false;
+        $('#x-list').innerHTML = tables.map((t) => `${t.commune && !vu && (vu = true) ? '<div class="xl-sec">Tables communes aux deux applications</div>' : ''}<a data-t="${esc(t.name)}" class="${t.name === cur ? 'active' : ''}" title="${esc(t.name)}"><span>${esc(LIB[t.name] || t.name)}<em>${esc(t.name)}</em></span><small>${t.rows}</small></a>`).join('');
+        $('#x-sel').innerHTML = tables.map((t) => `<option ${t.name === cur ? 'selected' : ''} value="${esc(t.name)}">${esc(LIB[t.name] || t.name)} — ${esc(t.name)} (${t.rows})</option>`).join('');
         $$('#x-list a').forEach((a) => a.addEventListener('click', () => open(a.dataset.t)));
       };
       $('#x-sel').addEventListener('change', (e) => open(e.target.value));
@@ -286,8 +300,8 @@
         UI.loading($('#x-grid'));
         data = await get(`/data/table/${encodeURIComponent(cur)}?${p}`);
         $('#x-csv').href = `/api/data/export/${encodeURIComponent(cur)}.csv`;
-        $('#x-info').innerHTML = `<b>${esc(cur)}</b> · ${data.total} ligne(s) · ${data.columns.length} colonne(s)${data.pk ? ` · clé : <code>${esc(data.pk)}</code>` : ' · <span style="color:var(--red)">pas de clé primaire (lecture seule)</span>'}
-          · <span>Cliquez sur une cellule pour la modifier (Entrée / Tab / flèches pour naviguer, collage depuis Excel accepté).</span>`;
+        $('#x-info').innerHTML = `<b>${esc(LIB[cur] || cur)}</b> <code>${esc(cur)}</code> · ${data.total} ligne(s) · ${data.columns.length} colonne(s)${data.pk ? ` · clé : <code>${esc(data.pk)}</code>` : ' · <span style="color:var(--red)">pas de clé primaire (lecture seule)</span>'}
+          · <span>Cliquez sur une cellule pour la modifier (Entrée / Tab / flèches pour naviguer, collage depuis Excel accepté). La poubelle 🗑 en fin de ligne supprime la ligne.</span>`;
         grid();
         const pages = Math.max(1, Math.ceil(data.total / st.size));
         $('#x-pager').innerHTML = `<span>Page ${st.page} / ${pages}</span>
@@ -297,15 +311,37 @@
         $('#x-size').addEventListener('change', (e) => { st.size = Number(e.target.value); st.page = 1; load(); });
       }
 
+      // Suppression : si des lignes d'autres tables en dépendent, on demande une seconde confirmation
+      async function supprimer(ids) {
+        try { return await post(`/data/table/${encodeURIComponent(cur)}/delete`, { ids }); }
+        catch (x) {
+          if (x.status !== 409) throw x;
+          const msg = esc(x.message).replace(/\n/g, '<br>');
+          if (!(await confirm(`${msg}<br><br>Supprimer quand même ?`, { danger: true, okText: 'Oui, supprimer', title: 'Lignes liées' }))) return null;
+          return post(`/data/table/${encodeURIComponent(cur)}/delete`, { ids, force: true });
+        }
+      }
       const selRows = new Set();
       function grid() {
         selRows.clear(); $('#x-del').disabled = true;
         const cols = data.columns;
         const ro = (c) => !data.pk || c.name === data.pk || c.type === 'bytea';
         const show = (v) => (v === null || v === undefined ? '' : typeof v === 'boolean' ? (v ? 'true' : 'false') : String(v));
-        $('#x-grid').innerHTML = `<table class="xl"><thead><tr><th class="rh">#</th>${cols.map((c) => `<th data-sort="${esc(c.name)}">${esc(c.name)} ${st.sort === c.name ? (st.dir === 'asc' ? '▲' : '▼') : ''}<small>${esc(c.type)}</small></th>`).join('')}</tr></thead>
-          <tbody>${data.rows.map((r, i) => `<tr data-i="${i}"><td class="rh">${(st.page - 1) * st.size + i + 1}</td>${cols.map((c, j) => `<td class="${ro(c) ? 'ro' : ''} ${r[c.name] === null ? 'null' : ''}" data-j="${j}"><div ${ro(c) ? '' : 'contenteditable="true"'} spellcheck="false">${esc(show(r[c.name]))}</div></td>`).join('')}</tr>`).join('')
-          || `<tr><td colspan="${cols.length + 1}" class="empty">Table vide</td></tr>`}</tbody></table>`;
+        $('#x-grid').innerHTML = `<table class="xl"><thead><tr><th class="rh">#</th>${cols.map((c) => `<th data-sort="${esc(c.name)}">${esc(c.name)} ${st.sort === c.name ? (st.dir === 'asc' ? '▲' : '▼') : ''}<small>${esc(c.type)}</small></th>`).join('')}${data.pk ? '<th class="rdel"></th>' : ''}</tr></thead>
+          <tbody>${data.rows.map((r, i) => `<tr data-i="${i}"><td class="rh">${(st.page - 1) * st.size + i + 1}</td>${cols.map((c, j) => `<td class="${ro(c) ? 'ro' : ''} ${r[c.name] === null ? 'null' : ''}" data-j="${j}"><div ${ro(c) ? '' : 'contenteditable="true"'} spellcheck="false">${esc(show(r[c.name]))}</div></td>`).join('')}${data.pk ? `<td class="rdel"><button type="button" title="Supprimer cette ligne" data-del="${i}">${ic('trash')}</button></td>` : ''}</tr>`).join('')
+          || `<tr><td colspan="${cols.length + 2}" class="empty">Table vide</td></tr>`}</tbody></table>`;
+        $$('#x-grid [data-del]').forEach((b) => b.addEventListener('click', async () => {
+          const r = data.rows[Number(b.dataset.del)];
+          const apercu = data.columns.filter((c) => c.type !== 'bytea').slice(0, 4).map((c) => `${esc(c.name)} : <b>${esc(show(r[c.name]))}</b>`).join('<br>');
+          if (!(await confirm(`Supprimer définitivement cette ligne de <b>${esc(LIB[cur] || cur)}</b> ?<br><br>${apercu}`, { danger: true, okText: 'Oui, supprimer' }))) return;
+          try {
+            const x = await supprimer([r[data.pk]]);
+            if (!x) return;
+            ok(`${x.deleted} ligne supprimée.`);
+            const t = tables.find((y) => y.name === cur); if (t) { t.rows -= x.deleted; drawList(); }
+            load();
+          } catch (x) { err(x); }
+        }));
         $$('#x-grid th[data-sort]').forEach((th) => th.addEventListener('click', () => {
           const c = th.dataset.sort; st.dir = st.sort === c && st.dir === 'asc' ? 'desc' : 'asc'; st.sort = c; load();
         }));
@@ -402,21 +438,32 @@
       $('#x-q').addEventListener('keydown', (e) => { if (e.key === 'Enter') { st.search = e.target.value; st.page = 1; load(); } });
       $('#x-q').addEventListener('change', (e) => { st.search = e.target.value; st.page = 1; load(); });
       $('#x-ref').addEventListener('click', () => load().catch(err));
-      $('#x-add').addEventListener('click', async () => {
-        try {
-          await post(`/data/table/${encodeURIComponent(cur)}/row`, { values: {} });
-          ok('Ligne ajoutée.');
-          if (data.pk) { st.sort = data.pk; st.dir = 'desc'; st.page = 1; }
-          await load();
-          const t = tables.find((x) => x.name === cur); if (t) { t.rows++; drawList(); }
-          const f = nextEditable(0, -1, 0, 1); if (f) focusCell(f[0], f[1]);
-        } catch (x) { err(x); }
+      $('#x-add').addEventListener('click', () => {
+        // Fenêtre de saisie de la nouvelle ligne (les identifiants automatiques sont remplis par la base)
+        const cols = data.columns.filter((c) => !c.serial && c.type !== 'bytea');
+        const typ = (c) => (/date/.test(c.type) && !/time/.test(c.type) ? 'date' : /int|numeric|double|real/.test(c.type) ? 'nombre' : /bool/.test(c.type) ? 'oui / non' : /time/.test(c.type) ? 'heure / date-heure' : 'texte');
+        const m = modal({ title: `Nouvelle ligne — ${LIB[cur] || cur}`, wide: cols.length > 6, body: `<p class="muted" style="margin-top:0">Laissez vide ce qui n'est pas nécessaire. Les numéros automatiques sont créés par la base.</p>
+          <div class="grid2 stack-sm">${cols.map((c) => `<div class="field"><label>${esc(c.name)} <span class="muted" style="font-weight:500">(${typ(c)})</span></label>
+            <input class="input" data-c="${esc(c.name)}" ${typ(c) === 'date' ? 'type="date"' : ''} autocomplete="off"></div>`).join('')}</div>`,
+          foot: `<button class="btn sec" data-close>Annuler</button><button class="btn" data-ok>${ic('check')} Ajouter la ligne</button>` });
+        m.$('[data-ok]').addEventListener('click', async () => {
+          const values = {}; m.$$('[data-c]').forEach((i) => { if (i.value !== '') values[i.dataset.c] = i.value; });
+          if (!(await confirm(`Ajouter cette ligne dans <b>${esc(LIB[cur] || cur)}</b> ?`))) return;
+          try {
+            await post(`/data/table/${encodeURIComponent(cur)}/row`, { values });
+            ok('Ligne ajoutée.'); m.close();
+            if (data.pk) { st.sort = data.pk; st.dir = 'desc'; st.page = 1; }
+            await load();
+            const t = tables.find((x) => x.name === cur); if (t) { t.rows++; drawList(); }
+          } catch (x) { err(x); }
+        });
       });
       $('#x-del').addEventListener('click', async () => {
         const ids = [...selRows].map((i) => data.rows[i][data.pk]);
         if (!(await confirm(`Supprimer définitivement ${ids.length} ligne(s) de la table <b>${esc(cur)}</b> ?`, { danger: true, okText: 'Oui' }))) return;
         try {
-          const r = await post(`/data/table/${encodeURIComponent(cur)}/delete`, { ids });
+          const r = await supprimer(ids);
+          if (!r) return;
           ok(`${r.deleted} ligne(s) supprimée(s).`);
           const t = tables.find((x) => x.name === cur); if (t) { t.rows -= r.deleted; drawList(); }
           load();
