@@ -83,9 +83,7 @@
   };
 
   // ================= REÇU (ticket client) =================
-  async function recu(t, { nouveau = false } = {}) {
-    const I = await info();
-    const html = `<div class="ticket">
+  const recuHtml = (t, I) => `<div class="ticket">${Imprimante.get().logo ? `<img class="tk-logo" src="${(document.querySelector('.sidebar .brand img') || {}).src || '/img/logo.jpg'}" alt="">` : ''}
       <div class="tk-h"><b>${esc(I.nom)}</b>${I.adresse ? `<span>${esc(I.adresse)}</span>` : ''}${I.telephone ? `<span>Tél : ${esc(I.telephone)}</span>` : ''}</div>
       <div class="tk-sep"></div>
       <div class="tk-row"><span>Reçu N°</span><b>${esc(t.numero)}</b></div>
@@ -104,24 +102,27 @@
       ${t.annulee ? `<div class="tk-annule">TICKET ANNULÉ</div>` : ''}
       <div class="tk-sep"></div>
       <div class="tk-f">${esc(I.message || 'Merci de votre visite !')}</div></div>`;
+  async function recu(t, { nouveau = false } = {}) {
+    const I = await info();
+    const html = recuHtml(t, I);
     const m = modal({ title: nouveau ? 'Vente enregistrée — reçu' : `Reçu ${t.numero}`, body: html,
       foot: `${!nouveau && adminOnly() && !t.annulee ? `<button class="btn red" data-ann>${ic('x')} Annuler le ticket</button>` : ''}
         <button class="btn sec" data-close>Fermer</button><button class="btn" data-print>${ic('print')} Imprimer le reçu</button>` });
-    m.$('[data-print]').addEventListener('click', () => imprimer(html));
+    const lancer = async () => {
+      const b = m.$('[data-print]'); b.disabled = true;
+      try { await Imprimante.imprimer(t, I, html); if (Imprimante.get().mode !== 'systeme') ok('Ticket envoyé à l\'imprimante.'); }
+      catch (x) { if (!(x && x.name === 'NotFoundError')) err(x && x.message ? 'Impression : ' + x.message : x); }
+      finally { b.disabled = false; }
+    };
+    m.$('[data-print]').addEventListener('click', lancer);
+    // Impression automatique après la vente (si activée pour cet appareil)
+    if (nouveau && Imprimante.get().auto && (Imprimante.get().mode !== 'bluetooth' || Imprimante.connecte())) setTimeout(lancer, 300);
     const a = m.$('[data-ann]');
     if (a) a.addEventListener('click', async () => {
       if (!(await confirm(`Voulez-vous annuler le ticket <b>${esc(t.numero)}</b> (${money(t.total)}) ?<br><span class="muted">Les ressources consommées seront remises en stock.</span>`, { danger: true }))) return;
       try { await post(`/resto/ventes/${t.id}/annuler`); ok('Ticket annulé avec succès.'); m.close(); window.dispatchEvent(new HashChangeEvent('hashchange')); } catch (x) { err(x); }
     });
   }
-  function imprimer(html) {
-    let z = document.getElementById('print-area');
-    if (!z) { z = document.createElement('div'); z.id = 'print-area'; document.body.appendChild(z); }
-    z.innerHTML = html;
-    document.body.classList.add('printing');
-    setTimeout(() => { try { window.print(); } catch {} setTimeout(() => document.body.classList.remove('printing'), 500); }, 50);
-  }
-
   // ================= VENTE (caisse comptoir) =================
   Pages['/resto/vente'] = {
     title: 'Vente — caisse', back: '/resto',
@@ -264,6 +265,7 @@
 
   // ================= TICKETS =================
   Pages['/resto/tickets'] = {
+    pdf: true,
     title: 'Tickets / reçus', back: '/resto',
     async render(el) {
       el.innerHTML = `<div class="toolbar">
@@ -289,5 +291,5 @@
     },
   };
 
-  window.RestoUtil = { recu, info, unites, MODES, resetInfo: () => { INFO = null; } };
+  window.RestoUtil = { recu, recuHtml, info, unites, MODES, resetInfo: () => { INFO = null; } };
 })();

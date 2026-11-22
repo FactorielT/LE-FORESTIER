@@ -220,6 +220,7 @@
     ], rows, { empty: 'Aucun mouvement.' });
   }
   Pages['/resto/stock/mouvements'] = {
+    pdf: true,
     title: 'Mouvements de stock', back: '/resto/stock',
     async render(el) {
       const res = await get('/resto/ressources');
@@ -362,6 +363,7 @@
 
   // ================= BILANS =================
   Pages['/resto/bilans'] = {
+    pdf: true,
     title: 'Bilans des ventes', back: '/resto',
     async render(el) {
       const presets = [["Aujourd'hui", 1], ['7 jours', 7], ['Ce mois', 'm'], ['30 jours', 30], ['12 mois', 365]];
@@ -370,11 +372,18 @@
           <div class="field"><label>Du</label><input class="input" type="date" name="du" value="${today()}"></div>
           <div class="field"><label>Au</label><input class="input" type="date" name="au" value="${today()}"></div>
           <button class="btn" data-go>${ic('search')} Afficher</button></div></div>
-        <div id="b-best"></div>
         <div class="kpis" id="b-kpi"></div>
+        <div class="bilan-split">
+          <div class="card"><div class="card-title">${ic('list')} Produits vendus <span class="muted" id="b-per" style="margin-left:auto;font-weight:500;font-size:12.5px"></span></div>
+            <div class="search" style="margin-bottom:10px">${ic('search')}<input class="input" id="b-q" placeholder="Rechercher un produit…"></div>
+            <div class="tbl-wrap tall" id="b-prod"></div></div>
+          <div class="card"><div class="card-title">${ic('report')} Le plus vendu sur la période</div>
+            <div class="presets" id="b-tri" style="margin-bottom:10px"><button data-k="qte" class="on">Quantité</button><button data-k="ca">Montant</button></div>
+            <div id="b-best"></div>
+            <div class="chart-box tall"><canvas id="b-top"></canvas></div><div id="b-top-d"></div></div>
+        </div>
         <div class="stats-grid">
           <div class="card full"><div class="card-title">${ic('chart')} Ventes par jour</div><div class="chart-box"><canvas id="b-jour"></canvas></div><div id="b-jour-d"></div></div>
-          <div class="card"><div class="card-title">${ic('report')} Plats les plus vendus (quantité)</div><div class="chart-box tall"><canvas id="b-top"></canvas></div><div id="b-top-d"></div></div>
           <div class="card"><div class="card-title">${ic('wallet')} Encaissements par mode de paiement</div><div class="chart-box tall"><canvas id="b-mode"></canvas></div><div id="b-mode-d"></div></div>
           <div class="card"><div class="card-title">${ic('list')} Ventes par catégorie</div><div class="tbl-wrap auto" id="b-cat"></div></div>
           <div class="card"><div class="card-title">${ic('clock')} Ventes par heure</div><div class="chart-box"><canvas id="b-h"></canvas></div></div>
@@ -384,18 +393,45 @@
       const load = async () => {
         const d = await get(`/resto/bilan?du=${$('[name=du]').value}&au=${$('[name=au]').value}`);
         const k = d.kpi;
-        const best = d.top.find((x) => !/boisson|accompagnement/i.test(x.categorie || '')) || d.top[0];
-        $('#b-best').innerHTML = best ? `<div class="best"><div class="best-ic">${ic('report')}</div><div><small>Plat le plus vendu ${d.du === d.au ? `le ${dfr(d.du)}` : `du ${dfr(d.du)} au ${dfr(d.au)}`}</small>
-          <b>${esc(best.nom)}</b><span>${qty(best.qte)} plat(s) vendu(s) · ${money(best.ca)} F</span></div></div>` : '';
+        const per = d.du === d.au ? `le ${dfr(d.du)}` : `du ${dfr(d.du)} au ${dfr(d.au)}`;
+        $('#b-per').textContent = per;
+        // Liste de tous les produits vendus avec leurs montants
+        const prods = d.produits || [];
+        const drawProd = () => {
+          const qv = ($('#b-q').value || '').toLowerCase();
+          const rows = prods.filter((r) => !qv || r.nom.toLowerCase().includes(qv) || String(r.categorie).toLowerCase().includes(qv));
+          const tq = sum(prods, 'qte'), tca = sum(prods, 'ca');
+          table($('#b-prod'), [
+            { t: 'Produit', f: (r) => `<b>${esc(r.nom)}</b>${r.accomp ? ' <span class="badge">accomp.</span>' : ''}`, cls: 'wrap', first: 1 },
+            { t: 'Catégorie', hm: 1, f: (r) => esc(r.categorie) },
+            { t: 'Qté', r: 1, f: (r) => `<b>${qty(r.qte)}</b>` },
+            { t: 'Prix unitaire', r: 1, hm: 1, f: (r) => (r.prix_min === r.prix_max ? money(r.prix_max) : `${money(r.prix_min)} – ${money(r.prix_max)}`) },
+            { t: 'Montant', r: 1, f: (r) => `<b>${money(r.ca)}</b>` },
+            { t: 'Part', r: 1, f: (r) => (tca ? Math.round((r.ca / tca) * 1000) / 10 + ' %' : '—') },
+          ], rows, { green: 1, empty: 'Aucun produit vendu sur la période.', foot: [`Total (${prods.length} produits)`, '', qty(tq), '', money(tca), tca ? '100 %' : ''] });
+        };
+        $('#b-q').oninput = drawProd;
+        drawProd();
+        // Le plus vendu (plats, hors boissons et accompagnements), par quantité ou par montant
+        const drawBest = () => {
+          const k = ($('#b-tri .on') || {}).dataset ? $('#b-tri .on').dataset.k : 'qte';
+          const plats = d.top.filter((x) => !/boisson|accompagnement/i.test(x.categorie || ''));
+          const liste = (plats.length ? plats : d.top).slice().sort((a, b) => b[k] - a[k] || b.qte - a.qte);
+          const best = liste[0];
+          $('#b-best').innerHTML = best ? `<div class="best"><div class="best-ic">${ic('report')}</div><div><small>Plat le plus vendu ${per}</small>
+            <b>${esc(best.nom)}</b><span>${qty(best.qte)} plat(s) vendu(s) · ${money(best.ca)} F</span></div></div>` : '<div class="empty">Aucune vente sur la période.</div>';
+          const top = liste.slice(0, 10);
+          Charts.combo($('#b-top'), top.map((x) => (x.nom.length > 20 ? x.nom.slice(0, 19) + '…' : x.nom)), [{ label: k === 'qte' ? 'Plats vendus' : 'Montant', data: top.map((x) => x[k]), color: Charts.C.s2 }], { horizontal: true, unit: k === 'qte' ? '' : ' F' });
+          $('#b-top-d').innerHTML = Charts.dataTable([{ t: 'Rang', f: (r, i) => i + 1 }, { t: 'Plat', f: (r) => esc(r.nom) }, { t: 'Qté', r: 1, f: (r) => r.qte }, { t: 'Montant', r: 1, f: (r) => money(r.ca) }], liste);
+        };
+        $$('#b-tri [data-k]').forEach((b) => { b.onclick = () => { $$('#b-tri [data-k]').forEach((x) => x.classList.toggle('on', x === b)); drawBest(); }; });
+        drawBest();
         const kpi = (l, v, s, i, c) => `<div class="kpi"><div class="kpi-ic ${c}">${ic(i)}</div><div><small>${l}</small><b>${v}</b><span>${s}</span></div></div>`;
         $('#b-kpi').innerHTML = kpi("Chiffre d'affaires", money(k.ca), `${k.tickets} ticket(s)`, 'cart', 'c1') + kpi('Plats vendus', qty(k.plats), `Panier moyen ${money(k.panier)} F`, 'report', 'c4')
           + kpi('Dépenses', money(k.depenses), `Résultat ${money(k.net)} F`, 'wallet', 'c5') + kpi('Achats de stock', money(k.appro), 'Approvisionnements', 'truck', 'c3');
         const lab = d.jours.map((x) => x.d.slice(8, 10) + '/' + x.d.slice(5, 7));
         Charts.combo($('#b-jour'), lab, [{ label: 'Ventes', data: d.jours.map((x) => x.ca), color: Charts.C.s1 }, { label: 'Dépenses', data: d.jours.map((x) => x.depenses), color: Charts.C.s3 }]);
         $('#b-jour-d').innerHTML = Charts.dataTable([{ t: 'Date', f: (r) => dfr(r.d) }, { t: 'Tickets', r: 1, f: (r) => r.tickets }, { t: 'Ventes', r: 1, f: (r) => money(r.ca) }, { t: 'Dépenses', r: 1, f: (r) => money(r.depenses) }], d.jours);
-        const top = d.top.slice(0, 10);
-        Charts.combo($('#b-top'), top.map((x) => (x.nom.length > 20 ? x.nom.slice(0, 19) + '…' : x.nom)), [{ label: 'Plats vendus', data: top.map((x) => x.qte), color: Charts.C.s2 }], { horizontal: true, unit: '' });
-        $('#b-top-d').innerHTML = Charts.dataTable([{ t: 'Plat', f: (r) => esc(r.nom) }, { t: 'Qté', r: 1, f: (r) => r.qte }, { t: 'Montant', r: 1, f: (r) => money(r.ca) }], d.top);
         const ml = Object.keys(MODES).map((x) => MODES[x]), mv = Object.keys(MODES).map((x) => d.parMode[x]);
         Charts.donut($('#b-mode'), ml, mv, [Charts.C.s3, Charts.C.s1, Charts.C.s2]);
         $('#b-mode-d').innerHTML = Charts.dataTable([{ t: 'Mode', f: (r) => r[0] }, { t: 'Montant', r: 1, f: (r) => money(r[1]) }], ml.map((l, i) => [l, mv[i]]));
@@ -421,6 +457,7 @@
   };
 
   Pages['/resto/bilans/caisse'] = {
+    pdf: true,
     title: 'Bilans fermeture caisse', back: '/resto',
     async render(el) {
       el.innerHTML = `<div class="toolbar"><div class="field"><label>Du</label><input class="input" type="date" name="du" value="${firstOfMonth()}"></div>
@@ -458,7 +495,7 @@
             <td class="r"><b>${unites(r.stock, r.unite)}</b></td>
             <td class="c"><input type="checkbox" data-f="actif" ${r.actif ? 'checked' : ''} title="Actif"></td>
             <td style="white-space:nowrap"><button class="btn sm" data-save title="Enregistrer">${ic('check')}</button> <button class="btn sm red" data-del title="Supprimer">${ic('trash')}</button></td></tr>`).join('')}</tbody></table></div></div>
-        <div class="card"><div class="card-title">${ic('print')} Reçu de vente</div>
+        <div class="card"><div class="card-title">${ic('print')} Reçu de vente <a class="link-more" href="#/resto/imprimante" style="margin-left:auto">Imprimante de cet appareil ›</a></div>
           <div class="grid2 stack-sm">
             <div class="field"><label>Nom du restaurant</label><input class="input" data-p="resto_nom" value="${esc(I.nom)}"></div>
             <div class="field"><label>Téléphone</label><input class="input" data-p="resto_telephone" value="${esc(I.telephone)}"></div>
@@ -507,6 +544,75 @@
       $('#p-save').addEventListener('click', async () => {
         if (!(await confirm('Enregistrer les paramètres du reçu ?'))) return;
         try { for (const i of $$('[data-p]')) await put('/admin/parametres', { cle: i.dataset.p, valeur: i.value }); window.RestoUtil.resetInfo(); ok('Paramètres enregistrés avec succès.'); } catch (x) { err(x); }
+      });
+    },
+  };
+  // ================= IMPRIMANTE DES TICKETS (réglage par appareil) =================
+  Pages['/resto/imprimante'] = {
+    title: 'Imprimante des tickets', back: '/resto',
+    async render(el) {
+      const c = Imprimante.get();
+      const MODES_IMP = [
+        ['systeme', 'Imprimante installée (USB / WiFi)', "Utilise l'impression de l'appareil : imprimante installée sur le PC (USB ou WiFi) ou service d'impression Android."],
+        ['bluetooth', 'Bluetooth direct', "Imprimante thermique Bluetooth (BLE) connectée directement depuis Google Chrome ou Edge, sur Android ou PC."],
+        ['rawbt', 'Application RawBT (Android)', "Passe par l'application gratuite « RawBT » : imprimantes Bluetooth classiques et imprimantes WiFi / réseau (adresse IP)."],
+      ];
+      el.innerHTML = `<div class="card" style="max-width:760px;margin:0 auto">
+          <div class="card-title">${ic('print')} Imprimante des tickets <span class="badge" style="margin-left:auto">Réglage de cet appareil</span></div>
+          <p class="muted" style="margin-top:0">Chaque téléphone, tablette ou ordinateur garde son propre réglage : faites-le sur chaque appareil qui imprime des reçus.</p>
+          <div class="imp-modes">${MODES_IMP.map(([v, t, d]) => `<label class="imp-mode"><input type="radio" name="imp-mode" value="${v}" ${c.mode === v ? 'checked' : ''}><div><b>${t}</b><small>${d}</small></div></label>`).join('')}</div>
+          <div id="imp-detail"></div>
+          <div class="grid2 stack-sm" style="margin-top:12px">
+            <div class="field"><label>Largeur du papier</label><select class="input" id="imp-l"><option value="58" ${Number(c.largeur) === 58 ? 'selected' : ''}>58 mm (petite imprimante)</option><option value="80" ${Number(c.largeur) === 80 ? 'selected' : ''}>80 mm</option></select></div>
+            <div class="field"><label>Nombre d'exemplaires</label><select class="input" id="imp-n">${[1, 2, 3].map((x) => `<option ${Number(c.copies) === x ? 'selected' : ''}>${x}</option>`).join('')}</select></div>
+          </div>
+          <label class="chk-line"><input type="checkbox" id="imp-auto" ${c.auto ? 'checked' : ''}> Imprimer automatiquement le reçu après chaque vente</label>
+          <label class="chk-line"><input type="checkbox" id="imp-logo" ${c.logo ? 'checked' : ''}> Imprimer le logo en haut du reçu</label>
+          <label class="chk-line imp-esc"><input type="checkbox" id="imp-acc" ${c.accents ? 'checked' : ''}> Imprimer les accents (é, è, à…) — décochez si l'imprimante affiche des caractères bizarres</label>
+          <label class="chk-line imp-esc"><input type="checkbox" id="imp-cut" ${c.coupe ? 'checked' : ''}> Couper le papier à la fin du ticket (imprimantes avec massicot)</label>
+          <div class="btn-bar"><button class="btn sec" id="imp-test">${ic('print')} Imprimer un ticket de test</button><button class="btn" id="imp-save">${ic('check')} Enregistrer</button></div>
+        </div>`;
+      const mode = () => ($('[name=imp-mode]:checked') || {}).value || 'systeme';
+      const detail = () => {
+        const m = mode();
+        $$('.imp-esc').forEach((x) => x.classList.toggle('hidden', m === 'systeme'));
+        const d = $('#imp-detail');
+        if (m === 'systeme') d.innerHTML = `<div class="notice info">${ic('info')}<div>Installez d'abord l'imprimante sur l'appareil (pilote Windows, ou sur Android un service d'impression comme « Mopria » ou celui du fabricant).
+          Au moment d'imprimer, choisissez-la dans la fenêtre d'impression, avec le format de papier ${$('#imp-l').value} mm et sans marges.</div></div>`;
+        else if (m === 'bluetooth') d.innerHTML = Imprimante.btDispo()
+          ? `<div class="notice info">${ic('info')}<div>Allumez l'imprimante, activez le Bluetooth de l'appareil, puis cliquez sur <b>Rechercher l'imprimante</b> et choisissez-la dans la liste.
+              <div class="row" style="margin-top:10px;gap:8px;align-items:center"><button class="btn sm" id="imp-bt">${ic('search')} Rechercher l'imprimante</button>
+              ${Imprimante.get().appareil ? `<span>Imprimante : <b>${esc(Imprimante.get().appareil)}</b> ${Imprimante.connecte() ? '<span class="badge">connectée</span>' : '<span class="badge amber">se reconnecte à l\'impression</span>'}</span>
+              <button class="btn sm sec" id="imp-btx">${ic('x')} Oublier</button>` : '<span class="muted">Aucune imprimante choisie</span>'}</div></div></div>`
+          : `<div class="notice err">${ic('warn')}<div>Ce navigateur ne permet pas le Bluetooth direct (cas de l'iPhone, de Firefox et de Safari). Utilisez Google Chrome sur Android ou sur PC,
+              ou choisissez « Application RawBT » sur Android.</div></div>`;
+        else d.innerHTML = `<div class="notice info">${ic('info')}<div>${Imprimante.estAndroid() ? '' : '<b>Ce mode fonctionne seulement sur un téléphone ou une tablette Android.</b><br>'}
+          1. Installez <b>RawBT</b> depuis le Play Store.<br>2. Dans RawBT, choisissez la connexion : <b>Bluetooth</b> (imprimante appairée) ou <b>WiFi / réseau</b> (adresse IP de l'imprimante, port 9100).<br>
+          3. Faites un test d'impression ici : le ticket est envoyé à RawBT qui l'imprime.</div></div>`;
+        const b = $('#imp-bt');
+        if (b) b.addEventListener('click', async () => {
+          try { const nom = await Imprimante.choisirBluetooth(); ok(`Imprimante « ${nom} » connectée.`); detail(); }
+          catch (x) { if (!(x && x.name === 'NotFoundError')) err(x.message || x); }
+        });
+        const bx = $('#imp-btx');
+        if (bx) bx.addEventListener('click', () => { Imprimante.deconnecter(); detail(); });
+      };
+      const lire = () => ({ mode: mode(), largeur: Number($('#imp-l').value), copies: Number($('#imp-n').value), auto: $('#imp-auto').checked, logo: $('#imp-logo').checked, accents: $('#imp-acc').checked, coupe: $('#imp-cut').checked });
+      $$('[name=imp-mode]').forEach((r) => r.addEventListener('change', detail));
+      $('#imp-l').addEventListener('change', detail);
+      detail();
+      $('#imp-save').addEventListener('click', async () => {
+        if (!(await confirm('Enregistrer le réglage de l\'imprimante pour cet appareil ?'))) return;
+        Imprimante.set(lire()); ok('Réglage de l\'imprimante enregistré.');
+      });
+      $('#imp-test').addEventListener('click', async () => {
+        const avant = Imprimante.get(); Imprimante.set(lire());
+        try {
+          const I = await window.RestoUtil.info();
+          await Imprimante.imprimer(Imprimante.TEST, I, window.RestoUtil.recuHtml(Imprimante.TEST, I));
+          if (mode() !== 'systeme') ok('Ticket de test envoyé.');
+          detail();
+        } catch (x) { Imprimante.set(avant); if (!(x && x.name === 'NotFoundError')) err(x.message || x); }
       });
     },
   };

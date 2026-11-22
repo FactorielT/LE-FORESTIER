@@ -7,6 +7,7 @@
 
   // ================= INVENTAIRE =================
   Pages['/inventaire'] = {
+    pdf: true,
     title: 'Inventaire', back: '/',
     async render(el, params) {
       let onglet = params.tab === 'bilan' ? 'bilan' : 'saisie';
@@ -153,6 +154,7 @@
 
   // ================= BILAN DES VENTES PAR PRODUIT =================
   Pages['/bilans/produits'] = {
+    pdf: true,
     title: 'Bilan par produit', back: '/',
     async render(el, params) {
       let tri = 'qte';

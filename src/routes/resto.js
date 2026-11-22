@@ -440,6 +440,12 @@ router.get('/bilan', h(async (req, res) => {
     FROM d ORDER BY d.d`, P)).rows.map((r) => ({ d: r.d, ca: N(r.ca), tickets: N(r.tickets), depenses: N(r.depenses) }));
   const top = (await q(`SELECT l.nom, l.categorie, SUM(l.qte)::int qte, SUM(l.total) ca FROM resto_vente_ligne l JOIN resto_vente v ON v.id=l.vente_id
     WHERE v.date BETWEEN $1 AND $2 AND NOT v.annulee AND l.type <> 'accomp' GROUP BY l.nom, l.categorie ORDER BY 3 DESC, 4 DESC`, P)).rows.map((r) => ({ ...r, ca: N(r.ca) }));
+  // Liste complète des produits vendus (plats, boissons et accompagnements)
+  const produits = (await q(`SELECT l.nom, COALESCE(l.categorie,'—') categorie, BOOL_OR(l.type = 'accomp') accomp, SUM(l.qte)::int qte, SUM(l.total) ca,
+      COUNT(DISTINCT v.id)::int tickets, MIN(l.prix) prix_min, MAX(l.prix) prix_max
+    FROM resto_vente_ligne l JOIN resto_vente v ON v.id=l.vente_id
+    WHERE v.date BETWEEN $1 AND $2 AND NOT v.annulee GROUP BY l.nom, COALESCE(l.categorie,'—') ORDER BY 5 DESC, 4 DESC`, P)).rows
+    .map((r) => ({ ...r, ca: N(r.ca), prix_min: N(r.prix_min), prix_max: N(r.prix_max) }));
   const accomps = (await q(`SELECT l.nom, SUM(l.qte)::int qte, SUM(l.total) ca,
       COALESCE(SUM(l.qte) FILTER (WHERE l.parent_id IS NULL),0)::int seul, COALESCE(SUM(l.qte) FILTER (WHERE l.parent_id IS NOT NULL),0)::int avec
     FROM resto_vente_ligne l JOIN resto_vente v ON v.id=l.vente_id
@@ -455,7 +461,7 @@ router.get('/bilan', h(async (req, res) => {
     FROM resto_ressource r LEFT JOIN resto_mouvement m ON m.code=r.code AND m.date BETWEEN $1 AND $2 GROUP BY r.code, r.nom, r.unite, r.portions_par_unite, r.ordre ORDER BY r.ordre`, P)).rows
     .map((r) => ({ ...r, cout: N(r.cout) }));
   res.json({ du, au, kpi: { tickets: k.tickets, ca: N(k.ca), plats, panier: k.tickets ? Math.round(N(k.ca) / k.tickets) : 0, depenses: dep, appro, net: N(k.ca) - dep },
-    parMode: { ESPECE: N(k.espece), WAVE: N(k.wave), OM: N(k.om) }, jours, top, accomps, categories: cat, heures, conso });
+    parMode: { ESPECE: N(k.espece), WAVE: N(k.wave), OM: N(k.om) }, jours, top, produits, accomps, categories: cat, heures, conso });
 }));
 
 router.get('/dashboard', h(async (req, res) => {

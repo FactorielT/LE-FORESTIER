@@ -628,6 +628,7 @@ const Pages = {};
   };
 
   Pages['/creances/tableau'] = {
+    pdf: true,
     title: 'Tableau des créances', back: '/creances',
     async render(el) {
       el.innerHTML = `<div class="tbl-wrap tall" id="t-tbl"></div>
@@ -690,6 +691,7 @@ const Pages = {};
   };
 
   Pages['/creances/historique'] = {
+    pdf: true,
     title: 'Historiques des crédits', back: '/creances',
     async render(el) {
       const o = await creancierOptions();
@@ -761,6 +763,7 @@ const Pages = {};
   };
 
   Pages['/depenses/historique'] = {
+    pdf: true,
     title: 'Historiques des dépenses', back: '/depenses',
     async render(el) {
       const types = await get('/depenses/types');
@@ -793,6 +796,7 @@ const Pages = {};
 
   // ================= FERMETURE DE CAISSE =================
   Pages['/caisse'] = {
+    pdf: true,
     title: 'Fermeture de caisse', back: '/',
     async render(el, params) {
       el.innerHTML = `<div class="card" style="max-width:660px;margin:0 auto">
@@ -904,6 +908,7 @@ const Pages = {};
 
   // ================= BILANS =================
   Pages['/bilans/ventes'] = {
+    pdf: true,
     title: 'Bilans ventes', back: '/',
     async render(el, params) {
       el.innerHTML = `${periode(params.du || firstOfMonth(), params.au || today(), `<div class="spacer"></div><button class="btn blue" id="b-det">${ic('eye')} Voir détails d'un jour</button>`)}
@@ -941,6 +946,7 @@ const Pages = {};
   };
 
   Pages['/bilans/ventes/detail'] = {
+    pdf: true,
     title: 'Détail vente jour', back: '/bilans/ventes',
     async render(el, params) {
       const d = await get('/ventes/detail?numero=' + encodeURIComponent(params.numero));
@@ -974,6 +980,7 @@ const Pages = {};
   };
 
   Pages['/bilans/appros'] = {
+    pdf: true,
     title: 'Bilans des Appro', back: '/',
     async render(el) {
       el.innerHTML = `${periode(firstOfMonth(), today(), `<div class="spacer"></div><button class="btn blue" id="ba-det">${ic('eye')} Voir les Détails</button>`)}
@@ -1000,6 +1007,7 @@ const Pages = {};
   };
 
   Pages['/bilans/appros/detail'] = {
+    pdf: true,
     title: 'Détails Appro', back: '/bilans/appros',
     async render(el, params) {
       const rows = await get(`/appros/detail?numero=${encodeURIComponent(params.numero)}&date=${params.date || ''}`);
@@ -1024,6 +1032,7 @@ const Pages = {};
 
   // ================= STATISTIQUES =================
   Pages['/stats'] = {
+    pdf: true,
     title: 'Statistiques', back: '/',
     async render(el) {
       const presets = [['7j', 7], ['30j', 30], ['Ce mois', 'm'], ['3 mois', 90], ['12 mois', 365]];
@@ -1087,6 +1096,7 @@ const Pages = {};
   };
 
   Pages['/bilans/caisse'] = {
+    pdf: true,
     title: 'Bilans Fermeture Caisse', back: '/',
     async render(el) {
       el.innerHTML = `${periode(firstOfMonth(), today())}<div class="tbl-wrap" id="bc-tbl"></div><div class="stats" id="bc-tot" style="margin-top:14px"></div>

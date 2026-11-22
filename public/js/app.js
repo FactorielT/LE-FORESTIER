@@ -17,6 +17,7 @@ const App = (() => {
     { r: '/resto/stock', t: 'Stock', i: 'box' },
     { r: '/resto/depenses', t: 'Dépenses quotidiennes', i: 'wallet' },
     { r: '/resto/caisse', t: 'Fermeture de caisse', i: 'power' },
+    { r: '/resto/imprimante', t: 'Imprimante tickets', i: 'print' },
     { sec: 'Bilans' },
     { r: '/resto/bilans', t: 'Bilans des ventes', i: 'chart' },
     { r: '/resto/bilans/caisse', t: 'Bilans fermeture caisse', i: 'pie' },
@@ -154,8 +155,10 @@ const App = (() => {
       <div class="main">
         <header class="topbar"><button class="ib menu-btn" aria-label="Menu">${ic('menu')}</button>
           <button class="ib back-btn hidden" aria-label="Retour">${ic('back')}</button><h1 id="page-title"></h1>
+          <button class="ib pdf-btn hidden" data-pdf title="Télécharger cette page en PDF">${ic('down')}<span>PDF</span></button>
           <button class="ib" data-home title="Accueil">${ic('home')}</button>
           <button class="ib out-btn" data-logout-top title="Déconnexion">${ic('logout')}<span>Déconnexion</span></button></header>
+        <div class="print-head"><img src="/img/logo.jpg" alt=""><div><b>${esc(resto ? nomResto : nomEtab)}</b><span id="print-title"></span></div></div>
         <main class="content" id="page"></main>
       </div></div>`;
     const shell = $('.shell');
@@ -166,6 +169,10 @@ const App = (() => {
     $('[data-logout]').addEventListener('click', deconnexion);
     $('[data-logout-top]').addEventListener('click', deconnexion);
     $('[data-home]').addEventListener('click', () => go(accueil()));
+    $('[data-pdf]').addEventListener('click', async (e) => {
+      const b = e.currentTarget; b.disabled = true;
+      try { const f = await PDF.page({ root: $('#page') }); UI.ok(`PDF téléchargé : ${f}`); } catch (x) { UI.err(x.message || String(x)); } finally { b.disabled = false; }
+    });
     $('[data-pwd]').addEventListener('click', changePwd);
     const aa = $('[data-autre-app]');
     if (aa) aa.addEventListener('click', async (e) => {
@@ -221,6 +228,8 @@ const App = (() => {
     if (page.role && !allowed(page.role)) { UI.err('Accès réservé.'); return go(accueil()); }
     $('#page-title').textContent = typeof page.title === 'function' ? page.title(params) : page.title;
     document.title = ($('#page-title').textContent || 'Accueil') + ' · ' + (espace === 'resto' ? nomResto : nomEtab);
+    $('#print-title').textContent = $('#page-title').textContent;
+    $('.pdf-btn').classList.toggle('hidden', !page.pdf);
     $('.back-btn').classList.toggle('hidden', path === '/' || path === '/resto' || path === '/portail');
     $$('.sidebar nav a').forEach((a) => {
       const r = a.dataset.r;

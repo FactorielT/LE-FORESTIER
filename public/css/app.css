@@ -592,3 +592,34 @@ button.app-card .app-go { margin-top: auto; }
 .motif-ecart textarea { min-height: 70px; }
 .res-tbl tr.inactif td { opacity: .55; }
 .res-tbl tr.inactif td:last-child, .res-tbl tr.inactif td:nth-last-child(2) { opacity: 1; }
+
+/* Imprimante des tickets */
+.imp-modes { display: grid; gap: 8px; }
+.imp-mode { display: flex; gap: 10px; align-items: flex-start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; background: #fff; }
+.imp-mode:has(input:checked) { border-color: var(--g600); background: var(--g50); box-shadow: 0 0 0 1px var(--g600) inset; }
+.imp-mode input { margin-top: 3px; accent-color: var(--g600); }
+.imp-mode b { display: block; }
+.imp-mode small { color: var(--ink2); font-size: 12.5px; line-height: 1.45; }
+.chk-line { display: flex; gap: 8px; align-items: flex-start; margin: 10px 0 0; font-size: 14px; line-height: 1.4; }
+.chk-line input { margin-top: 3px; }
+#imp-detail .notice { margin-top: 12px; }
+.tk-page { break-after: page; page-break-after: always; height: 0; }
+.bilan-split { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); gap: 14px; margin-bottom: 14px; align-items: start; }
+.bilan-split .best { margin-bottom: 12px; }
+@media (max-width: 999px) { .bilan-split { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 1399px) { .bilan-split .tbl .hide-m { display: none; } }
+.bilan-split .tbl { width: 100%; }
+
+/* Export PDF + en-tête d'impression avec logo */
+.topbar .pdf-btn { display: inline-flex; align-items: center; gap: 6px; width: auto; padding: 0 12px; border-radius: 10px; background: rgba(255,255,255,.16); font-weight: 700; font-size: 13.5px; color: #fff; }
+.topbar .pdf-btn.hidden { display: none; }
+.topbar .pdf-btn svg { width: 18px; height: 18px; }
+.print-head { display: none; }
+@media print {
+  .print-head { display: flex; align-items: center; gap: 12px; padding: 0 0 8px; margin: 0 0 10px; border-bottom: 2px solid #333; }
+  .print-head img { width: 56px; height: 56px; object-fit: contain; }
+  .print-head b { display: block; font-size: 18px; }
+  .print-head span { font-size: 14px; color: #444; }
+  body.printing .print-head { display: none; }
+}
+.tk-logo { display: block; width: 64px; height: 64px; object-fit: contain; margin: 0 auto 6px; }

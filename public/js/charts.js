@@ -8,7 +8,7 @@ const Charts = (() => {
   const short = (v) => {
     const a = Math.abs(v);
     if (a >= 1e6) return (v / 1e6).toLocaleString('fr-FR', { maximumFractionDigits: 1 }) + ' M';
-    if (a >= 1e3) return (v / 1e3).toLocaleString('fr-FR', { maximumFractionDigits: 0 }) + ' k';
+    if (a >= 1e3) return (v / 1e3).toLocaleString('fr-FR', { maximumFractionDigits: a >= 1e4 ? 0 : 1 }) + ' k';
     return String(v);
   };
   const money = (v) => Math.round(Number(v) || 0).toLocaleString('fr-FR').replace(/ | /g, ' ');
@@ -84,7 +84,7 @@ const Charts = (() => {
   function dataTable(cols, rows) {
     return `<details class="chart-data"><summary>Voir les données</summary><div class="tbl-wrap auto" style="margin-top:8px"><table class="tbl">
       <thead><tr>${cols.map((c) => `<th class="${c.r ? 'r' : ''}">${c.t}</th>`).join('')}</tr></thead>
-      <tbody>${rows.map((r) => `<tr>${cols.map((c) => `<td class="${c.r ? 'r' : ''}">${c.f(r)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
+      <tbody>${rows.map((r, i) => `<tr>${cols.map((c) => `<td class="${c.r ? 'r' : ''}">${c.f(r, i)}</td>`).join('')}</tr>`).join('')}</tbody></table></div></details>`;
   }
 
   return { C, SERIES, combo, donut, dataTable, short, reset };
