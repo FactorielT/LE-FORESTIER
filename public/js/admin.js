@@ -16,7 +16,7 @@
           { r: '/admin/parametres', t: 'Paramètres', i: 'gear', c: 'c9' },
         ]),
         ...(App.isSuper() ? [
-          { r: '/admin/import', t: 'Importation des données', i: 'upload', c: 'c2' },
+          ...(App.user.app === 'resto' ? [] : [{ r: '/admin/import', t: 'Importation des données', i: 'upload', c: 'c2' }]),
           { r: '/admin/explorer', t: App.user.app === 'resto' ? 'Tables de la BD (restaurant)' : 'Tables de la BD (maquis)', i: 'db', c: 'c7' },
         ] : []),
       ];
@@ -287,7 +287,7 @@
           <div class="pager" id="x-pager"></div></div></div>`;
       const drawList = () => {
         let vu = false;
-        $('#x-list').innerHTML = tables.map((t) => `${t.commune && !vu && (vu = true) ? '<div class="xl-sec">Tables communes aux deux applications</div>' : ''}<a data-t="${esc(t.name)}" class="${t.name === cur ? 'active' : ''}" title="${esc(t.name)}"><span>${esc(LIB[t.name] || t.name)}<em>${esc(t.name)}</em></span><small>${t.rows}</small></a>`).join('');
+        $('#x-list').innerHTML = tables.map((t) => `${t.commune && !vu && (vu = true) ? '<div class="xl-sec">Comptes et paramètres</div>' : ''}<a data-t="${esc(t.name)}" class="${t.name === cur ? 'active' : ''}" title="${esc(t.name)}"><span>${esc(LIB[t.name] || t.name)}<em>${esc(t.name)}</em></span><small>${t.rows}</small></a>`).join('');
         $('#x-sel').innerHTML = tables.map((t) => `<option ${t.name === cur ? 'selected' : ''} value="${esc(t.name)}">${esc(LIB[t.name] || t.name)} — ${esc(t.name)} (${t.rows})</option>`).join('');
         $$('#x-list a').forEach((a) => a.addEventListener('click', () => open(a.dataset.t)));
       };

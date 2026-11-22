@@ -7,6 +7,12 @@ const { q, pool } = require('../db');
 const { superadmin, h, fail } = require('../util');
 
 router.use(superadmin);
+// La base de chaque application n'est accessible qu'au super administrateur DE cette application
+router.use((req, res, next) => {
+  const app = (req.user.app || 'maquis').toUpperCase();
+  if ((req.user.acces || 'MAQUIS') !== app) return res.status(403).json({ error: `Seul le super administrateur de ${app === 'RESTO' ? 'RESTO DU FORESTIER' : 'LE REPOS DU FORESTIER'} a accès à ses tables.` });
+  next();
+});
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 60 * 1024 * 1024 } });
 
 // ---------- Métadonnées ----------
@@ -27,11 +33,12 @@ async function tablesMeta() {
   for (const x of pk.rows) if (meta[x.t]) meta[x.t].pk = x.col;
   return meta;
 }
-// Chaque application a ses propres tables : resto_* pour le restaurant, les autres pour le maquis.
-// Les tables communes (utilisateurs, groupes, paramètres, blocage) sont visibles dans les deux.
+// Chaque application a ses propres tables, jamais mélangées : resto_* pour le restaurant, les autres pour le maquis.
+// Les comptes et paramètres (T_Utilisateur, T_Groupe, parametres, blocage) restent côté maquis (base d'origine) ;
+// les comptes du restaurant se gèrent dans Administration › Utilisateurs du restaurant.
 const COMMUNES = ['T_Utilisateur', 'T_Groupe', 'parametres', 'blocage'];
 const appDe = (req) => (req && req.user && req.user.app === 'resto' ? 'resto' : 'maquis');
-const dansApp = (name, app) => COMMUNES.includes(name) || (app === 'resto' ? name.startsWith('resto_') : !name.startsWith('resto_'));
+const dansApp = (name, app) => (app === 'resto' ? name.startsWith('resto_') : !name.startsWith('resto_'));
 async function getTable(name, req) {
   const meta = await tablesMeta();
   const t = meta[name];
@@ -298,7 +305,9 @@ router.get('/modele-import.xlsx', (req, res) => {
 router.get('/export-complet.xlsx', h(async (req, res) => {
   const meta = await tablesMeta();
   const wb = XLSX.utils.book_new();
+  const app = appDe(req);
   for (const t of Object.values(meta)) {
+    if (!dansApp(t.name, app)) continue;
     const cols = t.columns.filter((c) => c.type !== 'bytea');
     const rows = (await q(`SELECT ${cols.map((c) => qi(c.name)).join(',')} FROM ${qi(t.name)} ORDER BY 1`)).rows;
     const ws = XLSX.utils.json_to_sheet(rows, { header: cols.map((c) => c.name) });
@@ -307,7 +316,7 @@ router.get('/export-complet.xlsx', h(async (req, res) => {
   const buf = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
   const d = new Date().toISOString().slice(0, 10);
   res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
-  res.setHeader('Content-Disposition', `attachment; filename="sauvegarde-forestier-${d}.xlsx"`);
+  res.setHeader('Content-Disposition', `attachment; filename="sauvegarde-${app === 'resto' ? 'resto' : 'maquis'}-forestier-${d}.xlsx"`);
   res.send(buf);
 }));
 
@@ -416,6 +425,7 @@ function rewriteInsert(stmt, meta) {
 }
 
 router.post('/import/analyse', upload.single('fichier'), h(async (req, res) => {
+  if (appDe(req) !== 'maquis') throw fail("L'importation des données WinDev concerne uniquement LE REPOS DU FORESTIER (maquis).", 403);
   if (!req.file) throw fail('Aucun fichier reçu.');
   const meta = await tablesMeta();
   const name = (req.file.originalname || '').toLowerCase();
@@ -439,6 +449,7 @@ router.post('/import/analyse', upload.single('fichier'), h(async (req, res) => {
 }));
 
 router.post('/import/executer', upload.single('fichier'), h(async (req, res) => {
+  if (appDe(req) !== 'maquis') throw fail("L'importation des données WinDev concerne uniquement LE REPOS DU FORESTIER (maquis).", 403);
   if (!req.file) throw fail('Aucun fichier reçu.');
   const opts = JSON.parse(req.body.options || '{}');
   const meta = await tablesMeta();
@@ -508,6 +519,7 @@ router.post('/import/executer', upload.single('fichier'), h(async (req, res) => 
 
 // Recalcule le solde de chaque créancier = total crédits - total paiements
 router.post('/recalcul-creances', h(async (req, res) => {
+  if (appDe(req) !== 'maquis') throw fail("L'importation des données WinDev concerne uniquement LE REPOS DU FORESTIER (maquis).", 403);
   const client = await pool.connect();
   try {
     await client.query('BEGIN');

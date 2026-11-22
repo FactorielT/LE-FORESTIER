@@ -136,10 +136,22 @@ async function init() {
   if (!sa.rowCount) {
     const pwd = process.env.SUPERADMIN_PASSWORD || 'admin123';
     await q(
-      `INSERT INTO "T_Utilisateur"("Nom","Prenom","Login","mdp","NomGroupe","Application") VALUES ('Super','Admin','superadmin',$1,'SUPERADMIN','TOUS')`,
+      `INSERT INTO "T_Utilisateur"("Nom","Prenom","Login","mdp","NomGroupe","Application") VALUES ('Super','Admin','superadmin',$1,'SUPERADMIN','MAQUIS')`,
       [bcrypt.hashSync(pwd, 10)]
     );
     console.log(`Compte superadmin créé (login: superadmin / mot de passe: ${process.env.SUPERADMIN_PASSWORD ? '***' : 'admin123'})`);
+  }
+  // v20 : chaque application a son propre super administrateur (plus d'accès « TOUS » par défaut)
+  const sep = await q(`SELECT 1 FROM "parametres" WHERE cle='separation_superadmin_fait'`);
+  if (!sep.rowCount) {
+    await q(`UPDATE "T_Utilisateur" SET "Application"='MAQUIS' WHERE "Application"='TOUS' AND UPPER("NomGroupe") LIKE '%SUPER%'`);
+    await q(`INSERT INTO "parametres"(cle,valeur) VALUES ('separation_superadmin_fait','oui') ON CONFLICT (cle) DO NOTHING`);
+  }
+  const sr = await q(`SELECT 1 FROM "T_Utilisateur" WHERE "Application"='RESTO' AND UPPER("NomGroupe") LIKE '%SUPER%' LIMIT 1`);
+  if (!sr.rowCount) {
+    const pwd = process.env.RESTO_SUPERADMIN_PASSWORD || 'superresto';
+    await q(`INSERT INTO "T_Utilisateur"("Nom","Prenom","Login","mdp","NomGroupe","Application") VALUES ('Super','Admin Resto','superadmin',$1,'SUPERADMIN','RESTO')`, [bcrypt.hashSync(pwd, 10)]);
+    console.log(`Compte super administrateur du restaurant créé (login: superadmin / mot de passe: ${process.env.RESTO_SUPERADMIN_PASSWORD ? '***' : 'superresto'})`);
   }
 }
 
