@@ -196,7 +196,7 @@ const Imprimante = (() => {
     st.textContent = `@media print {
       @page { margin: 0; }
       html, body { background: #fff !important; margin: 0 !important; padding: 0 !important; width: auto !important; min-width: 0 !important; }
-      body.printing #print-area { width: 100%; max-width: ${mm}mm; padding: 2mm ${marge}mm; box-sizing: border-box; }
+      body.printing #print-area { width: 100%; max-width: ${mm}mm; margin: 0 auto !important; padding: 2mm ${marge}mm; box-sizing: border-box; }
       body.printing .ticket { width: 100% !important; max-width: none !important; padding: 0 !important; margin: 0 !important; border: 0 !important; box-sizing: border-box; font-size: ${fs}px !important; color: #000 !important; }
       body.printing .ticket * { color: #000 !important; }
       body.printing .tk-t { table-layout: fixed; width: 100%; font-size: ${fs - 0.5}px !important; }
